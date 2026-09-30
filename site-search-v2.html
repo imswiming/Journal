@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Site search</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #eef2f6;
+    --panel: #ffffff;
+    --ink: #1c2a3a;
+    --muted: #5b6b7d;
+    --line: #c9d3de;
+    --accent: #2f5fd0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141b24;
+      --panel: #1d2632;
+      --ink: #e4ebf3;
+      --muted: #93a3b6;
+      --line: #334155;
+      --accent: #7ea2ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    padding: 2rem 1.5rem;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex;
+    justify-content: center;
+  }
+  main { width: 100%; max-width: 40rem; }
+  h1 {
+    font-size: clamp(1.8rem, 5vw, 2.4rem);
+    font-weight: 800;
+    margin: 0 0 1.25rem;
+    letter-spacing: -0.02em;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1.25rem;
+  }
+  /* Loosen the CSE iframe/table so it doesn't overflow the panel on narrow screens */
+  .gsc-control-cse, .gsc-control-cse table, .gsc-input-box, .gsc-search-box {
+    max-width: 100% !important;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Search this site</h1>
+  <div class="panel">
+    <div class="gcse-search"></div>
+  </div>
+</main>
+<script async src="https://cse.google.com/cse.js?cx=c46bbd043c00a4bb7"></script>
+</body>
+</html>
