@@ -53,6 +53,100 @@
   .gsc-control-cse, .gsc-control-cse table, .gsc-input-box, .gsc-search-box {
     max-width: 100% !important;
   }
+  /* Google renders its own result list below the box; we replace it with #results-list.
+     Only hidden once we've actually confirmed real results came back (see .results-ready
+     below) - Google renders CAPTCHA/"unusual traffic" challenges in this same container,
+     and hiding it unconditionally would silently block the page with no way to resolve it. */
+  body.results-ready .gsc-results-wrapper-nooverlay,
+  body.results-ready .gsc-results-wrapper-overlay,
+  body.results-ready .gsc-modal-background-image {
+    display: none !important;
+  }
+  /* Google locks background scroll behind its (hidden) overlay via this class and never
+     unlocks it since we never trigger its own close; force scrolling back on. */
+  body.gsc-overflow-hidden {
+    overflow: visible !important;
+  }
+  #results-status {
+    margin: 1rem 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  #results-list {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+  }
+  #results-list li {
+    border-top: 1px solid var(--line);
+    padding: 0.85rem 0;
+  }
+  #results-list li:first-child {
+    border-top: none;
+  }
+  #results-list a {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  #results-list a:hover {
+    text-decoration: underline;
+  }
+  #results-list .result-url {
+    display: block;
+    margin-top: 0.2rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  #results-list .result-verse {
+    display: block;
+    margin-top: 0.4rem;
+    color: var(--ink);
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+  #results-list .result-verse .verse-ref {
+    font-weight: 600;
+  }
+  #results-list .result-verse .verse-version {
+    color: var(--muted);
+    font-weight: 400;
+  }
+  #results-list .result-toggle {
+    cursor: pointer;
+  }
+  #results-list .verse-context {
+    margin-top: 0.6rem;
+    padding: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    max-height: 16rem;
+    overflow-y: auto;
+  }
+  #results-list .verse-context .result-verse {
+    display: block;
+    color: var(--muted);
+    margin-top: 0.6rem;
+  }
+  #results-list .verse-context .result-verse:first-child {
+    margin-top: 0;
+  }
+  #results-list .verse-context .verse-found {
+    color: var(--ink);
+    background: var(--panel);
+    border-radius: 6px;
+    padding: 0.4rem 0.5rem;
+    margin-left: -0.5rem;
+    margin-right: -0.5rem;
+  }
+  #results-list .source-link {
+    display: inline-block;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: var(--muted);
+  }
 </style>
 </head>
 <body>
@@ -60,8 +154,360 @@
   <h1>Search this site</h1>
   <div class="panel">
     <div class="gcse-search"></div>
+    <p id="results-status"></p>
+    <ul id="results-list"></ul>
   </div>
 </main>
+<script>
+  var resultsRenderedForQuery = false;
+
+  // Bible books containing links are ranked first in the results list below.
+  var BIBLE_BOOKS = [
+    "genesis", "exodus", "leviticus", "numbers", "deuteronomy", "joshua", "judges", "ruth",
+    "1 samuel", "2 samuel", "1 kings", "2 kings", "1 chronicles", "2 chronicles",
+    "ezra", "nehemiah", "esther", "job", "psalm", "psalms", "proverbs", "ecclesiastes",
+    "song of solomon", "song of songs", "isaiah", "jeremiah", "lamentations", "ezekiel",
+    "daniel", "hosea", "joel", "amos", "obadiah", "jonah", "micah", "nahum", "habakkuk",
+    "zephaniah", "haggai", "zechariah", "malachi", "matthew", "mark", "luke", "john", "acts",
+    "romans", "1 corinthians", "2 corinthians", "galatians", "ephesians", "philippians",
+    "colossians", "1 thessalonians", "2 thessalonians", "1 timothy", "2 timothy", "titus",
+    "philemon", "hebrews", "james", "1 peter", "2 peter", "1 john", "2 john", "3 john",
+    "jude", "revelation"
+  ];
+  var BOOK_PATTERN = new RegExp(
+    "\\b(" + BIBLE_BOOKS.map(function (b) { return b.replace(/\s+/g, "\\s+"); }).join("|") + ")\\b",
+    "i"
+  );
+
+  function mentionsBibleBook(text) {
+    return BOOK_PATTERN.test(text || "");
+  }
+
+  // Local NIV text (private, gitignored - see data/niv.json) keyed as book -> chapter -> verse -> text.
+  var nivData = null;
+  fetch("data/niv.json")
+    .then(function (res) { return res.ok ? res.json() : null; })
+    .then(function (json) { nivData = json; })
+    .catch(function () { nivData = null; });
+
+  var BOOK_ALIASES = {
+    "genesis": "Genesis", "exodus": "Exodus", "leviticus": "Leviticus", "numbers": "Numbers",
+    "deuteronomy": "Deuteronomy", "joshua": "Joshua", "judges": "Judges", "ruth": "Ruth",
+    "1 samuel": "1 Samuel", "2 samuel": "2 Samuel", "1 kings": "1 Kings", "2 kings": "2 Kings",
+    "1 chronicles": "1 Chronicles", "2 chronicles": "2 Chronicles",
+    "ezra": "Ezra", "nehemiah": "Nehemiah", "esther": "Esther", "job": "Job",
+    "psalm": "Psalms", "psalms": "Psalms",
+    "proverbs": "Proverbs", "ecclesiastes": "Ecclesiastes",
+    "song of solomon": "Song of Solomon", "song of songs": "Song of Solomon",
+    "isaiah": "Isaiah", "jeremiah": "Jeremiah", "lamentations": "Lamentations",
+    "ezekiel": "Ezekiel", "daniel": "Daniel", "hosea": "Hosea", "joel": "Joel", "amos": "Amos",
+    "obadiah": "Obadiah", "jonah": "Jonah", "micah": "Micah", "nahum": "Nahum",
+    "habakkuk": "Habakkuk", "zephaniah": "Zephaniah", "haggai": "Haggai", "zechariah": "Zechariah",
+    "malachi": "Malachi", "matthew": "Matthew", "mark": "Mark", "luke": "Luke", "john": "John",
+    "acts": "Acts", "romans": "Romans", "1 corinthians": "1 Corinthians", "2 corinthians": "2 Corinthians",
+    "galatians": "Galatians", "ephesians": "Ephesians", "philippians": "Philippians", "colossians": "Colossians",
+    "1 thessalonians": "1 Thessalonians", "2 thessalonians": "2 Thessalonians",
+    "1 timothy": "1 Timothy", "2 timothy": "2 Timothy", "titus": "Titus", "philemon": "Philemon",
+    "hebrews": "Hebrews", "james": "James", "1 peter": "1 Peter", "2 peter": "2 Peter",
+    "1 john": "1 John", "2 john": "2 John", "3 john": "3 John", "jude": "Jude", "revelation": "Revelation"
+  };
+  var REF_ALIAS_KEYS = Object.keys(BOOK_ALIASES).sort(function (a, b) { return b.length - a.length; });
+  var REFERENCE_PATTERN = new RegExp(
+    "^(" + REF_ALIAS_KEYS.map(function (k) { return k.replace(/\s+/g, "\\s+"); }).join("|") + ")\\s+(\\d{1,3}):(\\d{1,3})",
+    "i"
+  );
+
+  function extractReference(title) {
+    var m = REFERENCE_PATTERN.exec((title || "").trim());
+    if (!m) return null;
+    var book = BOOK_ALIASES[m[1].toLowerCase().replace(/\s+/g, " ")];
+    return { book: book, chapter: m[2], verse: m[3], label: book + " " + m[2] + ":" + m[3] };
+  }
+
+  function lookupVerseText(ref) {
+    if (!nivData || !ref) return null;
+    var chapters = nivData[ref.book];
+    if (!chapters) return null;
+    var verses = chapters[ref.chapter];
+    if (!verses) return null;
+    return verses[ref.verse] || null;
+  }
+
+  function getChapterVerses(book, chapter) {
+    var chapters = nivData && nivData[book];
+    var verses = chapters && chapters[String(chapter)];
+    if (!verses) return [];
+    return Object.keys(verses)
+      .map(function (v) { return parseInt(v, 10); })
+      .sort(function (a, b) { return a - b; })
+      .map(function (v) { return { verse: v, text: verses[String(v)] }; });
+  }
+
+  // Google may hand back HTML-highlighted titles; strip tags without executing any script content.
+  function stripHtml(html) {
+    if (!html) return "";
+    return new DOMParser().parseFromString(html, "text/html").body.textContent || "";
+  }
+
+  function normalizeGoogleResult(r) {
+    return {
+      title: r.titleNoFormatting || stripHtml(r.title) || r.url,
+      url: r.url,
+      visibleUrl: r.visibleUrl || r.formattedUrl || r.url
+    };
+  }
+
+  // Reads whatever Google has currently rendered into its own (hidden) results DOM.
+  // Used for pages 2/3, which the widget does not surface through searchCallbacks.
+  function scrapeVisibleResults() {
+    var nodes = document.querySelectorAll(".gsc-webResult.gsc-result");
+    var out = [];
+    nodes.forEach(function (el) {
+      var a = el.querySelector("a.gs-title");
+      if (!a) return;
+      var urlLong = el.querySelector(".gs-visibleUrl-long");
+      var urlShort = el.querySelector(".gs-visibleUrl-short");
+      out.push({
+        title: a.textContent.trim(),
+        url: a.href,
+        visibleUrl: (urlLong && urlLong.textContent.trim()) || (urlShort && urlShort.textContent.trim()) || a.href
+      });
+    });
+    return out;
+  }
+
+  function goToResultsPage(pageNumber) {
+    var cursor = null;
+    document.querySelectorAll(".gsc-cursor-page").forEach(function (el) {
+      if (el.textContent.trim() === String(pageNumber)) cursor = el;
+    });
+    if (!cursor) return false;
+    ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(function (type) {
+      cursor.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    });
+    return true;
+  }
+
+  function waitForResultsUpdate(timeoutMs) {
+    return new Promise(function (resolve) {
+      var wrapper = document.querySelector(".gsc-results-wrapper-nooverlay, .gsc-results-wrapper-overlay");
+      if (!wrapper) { resolve(); return; }
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        observer.disconnect();
+        resolve();
+      }, timeoutMs);
+      var observer = new MutationObserver(function () {
+        if (done) return;
+        done = true;
+        observer.disconnect();
+        clearTimeout(timer);
+        setTimeout(resolve, 50);
+      });
+      observer.observe(wrapper, { childList: true, subtree: true });
+    });
+  }
+
+  // Google's element widget only reports page 1 through searchCallbacks.ready; pages 2+
+  // are fetched by simulating clicks on its own (hidden) pagination and scraping the DOM.
+  // onPage(itemsSoFar) fires after each page so the list can render progressively.
+  function fetchAdditionalPages(maxPage, onPage) {
+    var allExtra = [];
+    var chain = Promise.resolve();
+    var _loop = function (pageNum) {
+      chain = chain.then(function () {
+        var moved = goToResultsPage(pageNum);
+        if (!moved) return;
+        return waitForResultsUpdate(3000).then(function () {
+          allExtra = allExtra.concat(scrapeVisibleResults());
+          if (onPage) onPage(allExtra.slice());
+        });
+      });
+    };
+    for (var p = 2; p <= maxPage; p++) _loop(p);
+    return chain.then(function () {
+      goToResultsPage(1);
+      return allExtra;
+    });
+  }
+
+  function markStillLoading() {
+    var status = document.getElementById("results-status");
+    if (!/ \(loading more…\)$/.test(status.textContent)) {
+      status.textContent += " (loading more…)";
+    }
+  }
+
+  function clearStillLoading() {
+    var status = document.getElementById("results-status");
+    status.textContent = status.textContent.replace(/ \(loading more…\)$/, "");
+  }
+
+  function renderResults(items) {
+    var list = document.getElementById("results-list");
+    var status = document.getElementById("results-status");
+    list.innerHTML = "";
+
+    if (!items || !items.length) {
+      status.textContent = "";
+      return;
+    }
+
+    items = items.filter(function (item) {
+      return !!extractReference(item.title);
+    });
+
+    if (!items.length) {
+      status.textContent = "No Bible verse results found.";
+      return;
+    }
+
+    var ranked = items
+      .map(function (item, index) {
+        return {
+          item: item,
+          index: index,
+          isBook: mentionsBibleBook(item.title) || mentionsBibleBook(item.visibleUrl)
+        };
+      })
+      .sort(function (a, b) {
+        if (a.isBook !== b.isBook) return a.isBook ? -1 : 1;
+        return a.index - b.index;
+      })
+      .map(function (entry) { return entry.item; });
+
+    var seenRefs = {};
+    var deduped = ranked.filter(function (item) {
+      var ref = extractReference(item.title);
+      if (!ref) return true;
+      if (seenRefs[ref.label]) return false;
+      seenRefs[ref.label] = true;
+      return true;
+    });
+
+    status.textContent = "Results mentioning a book of the Bible are listed first.";
+
+    function buildVerseLine(refLabel, text) {
+      var line = document.createElement("span");
+      line.className = "result-verse";
+
+      var refEl = document.createElement("span");
+      refEl.className = "verse-ref";
+      refEl.textContent = refLabel + " ";
+      line.appendChild(refEl);
+
+      line.appendChild(document.createTextNode(text));
+      return line;
+    }
+
+    deduped.forEach(function (item) {
+      var li = document.createElement("li");
+
+      var ref = extractReference(item.title);
+      var verseText = ref ? lookupVerseText(ref) : null;
+
+      if (verseText) {
+        var toggle = document.createElement("a");
+        toggle.href = "#";
+        toggle.className = "result-toggle";
+        toggle.textContent = item.title;
+        li.appendChild(toggle);
+
+        var verseLine = buildVerseLine(ref.label, verseText + " ");
+        var versionEl = document.createElement("span");
+        versionEl.className = "verse-version";
+        versionEl.textContent = "(NIV)";
+        verseLine.appendChild(versionEl);
+        li.appendChild(verseLine);
+
+        var context = document.createElement("div");
+        context.className = "verse-context";
+        context.style.display = "none";
+
+        var chapterLabel = ref.book + " " + ref.chapter;
+        var chapterVerses = getChapterVerses(ref.book, ref.chapter);
+        var foundLineEl = null;
+        chapterVerses.forEach(function (v) {
+          var line = buildVerseLine(chapterLabel + ":" + v.verse, v.text);
+          if (String(v.verse) === ref.verse) {
+            line.classList.add("verse-found");
+            foundLineEl = line;
+          }
+          context.appendChild(line);
+        });
+        li.appendChild(context);
+        toggle.addEventListener("click", function (e) {
+          e.preventDefault();
+          var expanded = context.style.display !== "none";
+          context.style.display = expanded ? "none" : "block";
+          verseLine.style.display = expanded ? "block" : "none";
+          if (!expanded && foundLineEl) {
+            foundLineEl.scrollIntoView({ block: "center" });
+          }
+        });
+
+        var sourceLink = document.createElement("a");
+        sourceLink.className = "source-link";
+        sourceLink.href = item.url;
+        sourceLink.target = "_blank";
+        sourceLink.rel = "noopener noreferrer";
+        sourceLink.textContent = "View source ↗";
+        li.appendChild(sourceLink);
+      } else {
+        var a = document.createElement("a");
+        a.href = item.url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = item.title;
+        li.appendChild(a);
+
+        var urlLine = document.createElement("span");
+        urlLine.className = "result-url";
+        urlLine.textContent = item.visibleUrl;
+        li.appendChild(urlLine);
+      }
+
+      list.appendChild(li);
+    });
+  }
+
+  window.__gcse = {
+    searchCallbacks: {
+      web: {
+        starting: function () {
+          resultsRenderedForQuery = false;
+          // Leave Google's native UI visible until we confirm real results arrive, in
+          // case it needs to show a CAPTCHA/"unusual traffic" challenge instead.
+          document.body.classList.remove("results-ready");
+          document.getElementById("results-status").textContent = "Searching…";
+          document.getElementById("results-list").innerHTML = "";
+        },
+        ready: function (googName, query, promotions, results) {
+          // Google's widget can re-fire "ready" as it lazily loads more results while
+          // the (hidden) native results area is scrolled. Rebuilding the list on every
+          // firing collapses expanded verses and resets scroll position, so only the
+          // first firing per query kicks off rendering.
+          if (resultsRenderedForQuery) return;
+          document.body.classList.add("results-ready");
+          resultsRenderedForQuery = true;
+
+          var page1Items = (results || []).map(normalizeGoogleResult);
+          renderResults(page1Items);
+          markStillLoading();
+
+          fetchAdditionalPages(3, function (extraSoFar) {
+            renderResults(page1Items.concat(extraSoFar));
+            markStillLoading();
+          }).then(function () {
+            clearStillLoading();
+          });
+        }
+      }
+    }
+  };
+</script>
 <script async src="https://cse.google.com/cse.js?cx=c46bbd043c00a4bb7"></script>
 </body>
 </html>
