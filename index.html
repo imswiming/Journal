@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Site search</title>
+<title>Bible Search &amp; Read</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Figtree:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #eef2f6;
@@ -14,6 +14,7 @@
     --muted: #5b6b7d;
     --line: #c9d3de;
     --accent: #2f5fd0;
+    --highlight: #fff3a0;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -23,24 +24,22 @@
       --muted: #93a3b6;
       --line: #334155;
       --accent: #7ea2ff;
+      --highlight: #6b5d1f;
     }
   }
   * { box-sizing: border-box; }
-  body {
+  html, body {
     margin: 0;
-    min-height: 100vh;
-    padding: 2rem 1.5rem;
+    height: 100%;
     background: var(--bg);
     color: var(--ink);
     font-family: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
-    display: flex;
-    justify-content: center;
+    overscroll-behavior: none;
   }
-  main { width: 100%; max-width: 40rem; }
   h1 {
-    font-size: clamp(1.8rem, 5vw, 2.4rem);
+    font-size: clamp(1.4rem, 4vw, 1.8rem);
     font-weight: 800;
-    margin: 0 0 1.25rem;
+    margin: 0 0 1rem;
     letter-spacing: -0.02em;
   }
   .panel {
@@ -49,21 +48,98 @@
     border-radius: 14px;
     padding: 1.25rem;
   }
-  /* Loosen the CSE iframe/table so it doesn't overflow the panel on narrow screens */
+  .data-panel { margin-bottom: 1rem; }
+  .data-panel #data-status {
+    margin: 0 0 0.75rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  #data-file {
+    color: var(--ink);
+    font: inherit;
+  }
+  /* A single shared gate: nothing else is usable until the NIV file is loaded,
+     since every column depends on it. */
+  #data-gate {
+    max-width: 32rem;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+  }
+
+  /* ---------- Column shell ---------- */
+  .column-tabs {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+  .column-tab {
+    flex: 1;
+    text-align: center;
+    padding: 0.55rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .column-tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .columns-wrap {
+    display: flex;
+    height: calc(100vh - 56px);
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+  .column {
+    flex: 0 0 100vw;
+    max-width: 100vw;
+    scroll-snap-align: start;
+    overflow-y: auto;
+    height: 100%;
+  }
+  .column-pad {
+    padding: 1.25rem 1.25rem 3rem;
+    max-width: 40rem;
+    margin: 0 auto;
+  }
+  #col-comments .column-pad { max-width: 28rem; }
+
+  @media (min-width: 1100px) {
+    .column-tabs { display: none; }
+    .columns-wrap {
+      height: 100vh;
+      overflow-x: visible;
+      scroll-snap-type: none;
+    }
+    .column {
+      flex: 1 1 0;
+      max-width: none;
+      border-right: 1px solid var(--line);
+    }
+    .column:last-child { border-right: none; }
+    #col-search { flex: 1 1 0; min-width: 20rem; }
+    #col-read { flex: 1.8 1 0; min-width: 28rem; }
+    #col-comments { flex: 1 1 0; min-width: 18rem; }
+  }
+
+  /* ---------- Search column ---------- */
   .gsc-control-cse, .gsc-control-cse table, .gsc-input-box, .gsc-search-box {
     max-width: 100% !important;
   }
-  /* Google renders its own result list below the box; we replace it with #results-list,
-     so it's hidden by default. If a search hangs (e.g. Google serves a CAPTCHA/"unusual
-     traffic" challenge in this same container instead of firing "ready"), .results-stuck
-     is added after a timeout so the native UI becomes visible and solvable. */
   body:not(.results-stuck) .gsc-results-wrapper-nooverlay,
   body:not(.results-stuck) .gsc-results-wrapper-overlay,
   body:not(.results-stuck) .gsc-modal-background-image {
     display: none !important;
   }
-  /* Google locks background scroll behind its (hidden) overlay via this class and never
-     unlocks it since we never trigger its own close; force scrolling back on. */
   body.gsc-overflow-hidden {
     overflow: visible !important;
   }
@@ -81,17 +157,13 @@
     border-top: 1px solid var(--line);
     padding: 0.85rem 0;
   }
-  #results-list li:first-child {
-    border-top: none;
-  }
+  #results-list li:first-child { border-top: none; }
   #results-list a {
     color: var(--accent);
     font-weight: 600;
     text-decoration: none;
   }
-  #results-list a:hover {
-    text-decoration: underline;
-  }
+  #results-list a:hover { text-decoration: underline; }
   #results-list .result-url {
     display: block;
     margin-top: 0.2rem;
@@ -109,17 +181,14 @@
     font-weight: 600;
     color: inherit;
     text-decoration: none;
+    cursor: pointer;
   }
-  #results-list .result-verse .verse-ref:hover {
-    text-decoration: underline;
-  }
+  #results-list .result-verse .verse-ref:hover { text-decoration: underline; }
   #results-list .result-verse .verse-version {
     color: var(--muted);
     font-weight: 400;
   }
-  #results-list .result-toggle {
-    cursor: pointer;
-  }
+  #results-list .result-toggle { cursor: pointer; }
   #results-list .verse-context {
     margin-top: 0.6rem;
     padding: 0.75rem;
@@ -134,9 +203,7 @@
     color: var(--muted);
     margin-top: 0.6rem;
   }
-  #results-list .verse-context .result-verse:first-child {
-    margin-top: 0;
-  }
+  #results-list .verse-context .result-verse:first-child { margin-top: 0; }
   #results-list .verse-context .verse-found {
     color: var(--ink);
     background: var(--panel);
@@ -172,103 +239,426 @@
     font-size: 0.85rem;
     text-decoration: none;
     display: inline-block;
+    cursor: pointer;
   }
-  #results-list .xref-entry-label:hover {
-    text-decoration: underline;
-  }
+  #results-list .xref-entry-label:hover { text-decoration: underline; }
   #results-list .xref-empty {
     color: var(--muted);
     margin: 0;
   }
-  .mode-tabs {
+
+  /* ---------- Read column ---------- */
+  .nav-bar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 0.85rem 1.25rem;
+    margin-bottom: 1rem;
     display: flex;
     gap: 0.5rem;
-    margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+    align-items: center;
+    transition: transform 0.25s ease;
   }
-  .mode-tab {
-    padding: 0.5rem 1rem;
-    border-radius: 999px;
+  .nav-bar.nav-hidden { transform: translateY(-130%); }
+  .nav-bar select {
+    padding: 0.5rem 0.6rem;
     border: 1px solid var(--line);
-    font-size: 0.9rem;
-    font-weight: 600;
-    text-decoration: none;
-    color: var(--ink);
-  }
-  .mode-tab.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-  }
-  .data-panel {
-    margin-bottom: 1rem;
-  }
-  .data-panel #data-status {
-    margin: 0 0 0.75rem;
-    color: var(--muted);
-    font-size: 0.9rem;
-  }
-  #data-file {
+    border-radius: 8px;
+    background: var(--panel);
     color: var(--ink);
     font: inherit;
+  }
+  .nav-spacer { flex: 1; }
+  .nav-btn {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .nav-btn:disabled { opacity: 0.4; cursor: default; }
+  #bible-text {
+    font-family: "Lora", Georgia, "Times New Roman", serif;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: var(--ink);
+    user-select: text;
+  }
+  .book-heading {
+    font-family: "Figtree", sans-serif;
+    font-weight: 800;
+    font-size: 1.6rem;
+    margin: 2.5rem 0 1rem;
+    scroll-margin-top: 5.5rem;
+    text-align: center;
+  }
+  .book-heading:first-child { margin-top: 0; }
+  .chapter-section {
+    content-visibility: auto;
+    contain-intrinsic-size: 0 900px;
+  }
+  .chapter-heading {
+    font-family: "Figtree", sans-serif;
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: var(--muted);
+    margin: 1.5rem 0 0.5rem;
+    scroll-margin-top: 5.5rem;
+  }
+  .verse-num {
+    font-size: 0.7em;
+    font-weight: 700;
+    color: var(--ink);
+    opacity: 0.7;
+    vertical-align: super;
+    margin-right: 0.15em;
+  }
+  mark.highlight {
+    background: var(--highlight);
+    color: inherit;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  #bible-empty { color: var(--muted); font-size: 0.9rem; }
+
+  .comment-box label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    font-family: "Figtree", sans-serif;
+  }
+  #comment-overlay {
+    position: fixed;
+    inset: auto 0 0 0;
+    background: var(--panel);
+    display: none;
+    border-top: 1px solid var(--line);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.25);
+    padding: 1rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    z-index: 50;
+    max-width: 40rem;
+    margin: 0 auto;
+    left: 0;
+    right: 0;
+  }
+  #comment-input {
+    width: 100%;
+    padding: 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+    font: inherit;
+    resize: vertical;
+  }
+  .comment-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    align-items: center;
+  }
+  .comment-actions button {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--ink);
+    font-family: "Figtree", sans-serif;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #comment-remove, #highlight-remove {
+    background: transparent;
+    color: var(--muted);
+    border-color: transparent;
+  }
+  /* Anchored to the bottom of the screen rather than floating next to the
+     selection - the browser's own Copy/Share callout already claims that
+     spot on mobile, so following it there would just fight for the space. */
+  .selection-menu {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    justify-content: center;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-bottom: none;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.25);
+    padding: 0.5rem;
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+  .selection-menu button {
+    padding: 0.5rem 0.9rem;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    font-family: "Figtree", sans-serif;
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 1.5rem;
+  }
+  .modal-box {
+    background: var(--panel);
+    border-radius: 14px;
+    padding: 1.25rem;
+    width: 100%;
+    max-width: 24rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  }
+  .xref-box {
+    max-width: 32rem;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .xref-box h3 {
+    margin: 0 0 0.75rem;
+    font-family: "Figtree", sans-serif;
+    font-size: 1rem;
+    color: var(--ink);
+  }
+  .xref-list {
+    overflow-y: auto;
+    flex: 1;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.75rem;
+    background: var(--bg);
+  }
+  .xref-entry {
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--line);
+  }
+  .xref-entry:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+  .xref-ref {
+    font-weight: 600;
+    font-family: "Figtree", sans-serif;
+    font-size: 0.85rem;
+    color: var(--accent);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+  }
+  .xref-text {
+    margin-top: 0.3rem;
+    color: var(--ink);
+    line-height: 1.6;
+  }
+  .xref-text .verse-num {
+    font-size: 0.65em;
+    vertical-align: super;
+    color: var(--muted);
+    margin-right: 0.1rem;
+  }
+  .xref-empty {
+    color: var(--muted);
+    padding: 0.5rem 0;
+  }
+
+  /* ---------- Comments column ---------- */
+  .comment-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 0.7rem 0.85rem;
+    margin-bottom: 0.75rem;
+    cursor: pointer;
+  }
+  .comment-card .comment-card-ref {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 0.85rem;
+    margin-bottom: 0.3rem;
+  }
+  .comment-card .comment-card-highlight {
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-style: italic;
+    margin-bottom: 0.35rem;
+  }
+  .comment-card .comment-card-text {
+    color: var(--ink);
+    font-size: 0.9rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+  }
+  #comments-empty {
+    color: var(--muted);
+    font-size: 0.9rem;
   }
 </style>
 </head>
 <body>
-<main>
-  <h1>Search the bible</h1>
-  <div class="mode-tabs">
-    <a href="index.html" class="mode-tab active">Search</a>
-    <a href="read.html" class="mode-tab">Read</a>
-  </div>
-  <div id="data-box" class="panel data-panel" style="display:none;">
-    <p id="data-status">Select your NIV data file (niv.json) to enable verse lookups. It's remembered in this browser afterward - never uploaded anywhere.</p>
+
+<div id="data-gate">
+  <h1>Bible Search &amp; Read</h1>
+  <div id="data-box" class="panel data-panel">
+    <p id="data-status">Select your NIV data file (niv.json) to get started. It's remembered in this browser afterward - never uploaded anywhere.</p>
     <div id="data-picker">
       <input id="data-file" type="file" accept="application/json,.json">
     </div>
   </div>
-  <div class="panel">
-    <div class="gcse-search"></div>
-    <p id="results-status"></p>
-    <ul id="results-list"></ul>
+</div>
+
+<div id="app" style="display:none;">
+  <div class="column-tabs">
+    <button class="column-tab" type="button" data-target="col-search">Search</button>
+    <button class="column-tab" type="button" data-target="col-read">Read</button>
+    <button class="column-tab" type="button" data-target="col-comments">Comments</button>
   </div>
-</main>
+  <div class="columns-wrap" id="columns-wrap">
+
+    <section class="column" id="col-search">
+      <div class="column-pad">
+        <h1>Search the Bible</h1>
+        <div class="panel">
+          <div class="gcse-search"></div>
+          <p id="results-status"></p>
+          <ul id="results-list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="column" id="col-read">
+      <div class="column-pad">
+        <h1>Read the Bible</h1>
+        <div id="reader" class="panel">
+          <div class="nav-bar">
+            <select id="book-select"></select>
+            <select id="chapter-select"></select>
+            <button id="prev-chapter" class="nav-btn" type="button" title="Back">&larr;</button>
+            <button id="next-chapter" class="nav-btn" type="button" title="Forward">&rarr;</button>
+            <span class="nav-spacer"></span>
+          </div>
+          <div id="bible-text"></div>
+        </div>
+        <p id="bible-empty" style="display:none;">Load your NIV data file to start reading.</p>
+      </div>
+    </section>
+
+    <section class="column" id="col-comments">
+      <div class="column-pad">
+        <h1>Comments</h1>
+        <div id="comments-list"></div>
+        <p id="comments-empty">No comments yet - tap a highlight in Read to add one.</p>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<div id="selection-menu" class="selection-menu" style="display:none;">
+  <button id="selection-highlight-btn" type="button">Highlight</button>
+  <button id="selection-highlight-verse-btn" type="button">Highlight verse</button>
+  <button id="view-biblehub" type="button">View on BibleHub</button>
+  <button id="view-xrefs" type="button">Cross References</button>
+</div>
+
+<div id="xref-overlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box xref-box">
+    <h3 id="xref-title">Cross References</h3>
+    <div id="xref-list" class="xref-list"></div>
+    <div class="comment-actions">
+      <span class="nav-spacer"></span>
+      <button id="xref-close" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="comment-overlay" style="display:none;">
+  <div class="comment-box">
+    <label for="comment-input">Comment on this highlight</label>
+    <textarea id="comment-input" rows="4"></textarea>
+    <div class="comment-actions">
+      <button id="comment-remove" type="button">Remove comment</button>
+      <button id="highlight-remove" type="button">Remove highlight</button>
+    </div>
+  </div>
+</div>
+
 <script>
-  var resultsRenderedForQuery = false;
-  var stuckTimer = null;
-
-  // Bible books containing links are ranked first in the results list below.
-  var BIBLE_BOOKS = [
-    "genesis", "exodus", "leviticus", "numbers", "deuteronomy", "joshua", "judges", "ruth",
-    "1 samuel", "2 samuel", "1 kings", "2 kings", "1 chronicles", "2 chronicles",
-    "ezra", "nehemiah", "esther", "job", "psalm", "psalms", "proverbs", "ecclesiastes",
-    "song of solomon", "song of songs", "isaiah", "jeremiah", "lamentations", "ezekiel",
-    "daniel", "hosea", "joel", "amos", "obadiah", "jonah", "micah", "nahum", "habakkuk",
-    "zephaniah", "haggai", "zechariah", "malachi", "matthew", "mark", "luke", "john", "acts",
-    "romans", "1 corinthians", "2 corinthians", "galatians", "ephesians", "philippians",
-    "colossians", "1 thessalonians", "2 thessalonians", "1 timothy", "2 timothy", "titus",
-    "philemon", "hebrews", "james", "1 peter", "2 peter", "1 john", "2 john", "3 john",
-    "jude", "revelation"
-  ];
-  var BOOK_PATTERN = new RegExp(
-    "\\b(" + BIBLE_BOOKS.map(function (b) { return b.replace(/\s+/g, "\\s+"); }).join("|") + ")\\b",
-    "i"
-  );
-
-  function mentionsBibleBook(text) {
-    return BOOK_PATTERN.test(text || "");
-  }
-
-  // NIV text is supplied by the user as a local file and cached in this browser's
-  // IndexedDB - it's never uploaded or fetched from any server. Keyed as
-  // book -> chapter -> verse -> text, same shape the rest of this file expects.
   var DB_NAME = "bible-search-cache";
   var STORE_NAME = "kv";
   var DATA_KEY = "niv.json";
+  var HIGHLIGHT_PREFIX = "highlights:";
+
+  var BOOKS_IN_ORDER = [
+    "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth",
+    "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles",
+    "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon",
+    "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah",
+    "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi",
+    "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians",
+    "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians",
+    "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews", "James", "1 Peter", "2 Peter",
+    "1 John", "2 John", "3 John", "Jude", "Revelation"
+  ];
+
+  var FULL_TO_ABBR = {
+    "Genesis": "Gen", "Exodus": "Exod", "Leviticus": "Lev", "Numbers": "Num", "Deuteronomy": "Deut",
+    "Joshua": "Josh", "Judges": "Judg", "Ruth": "Ruth", "1 Samuel": "1Sam", "2 Samuel": "2Sam",
+    "1 Kings": "1Kgs", "2 Kings": "2Kgs", "1 Chronicles": "1Chr", "2 Chronicles": "2Chr",
+    "Ezra": "Ezra", "Nehemiah": "Neh", "Esther": "Esth", "Job": "Job", "Psalms": "Ps",
+    "Proverbs": "Prov", "Ecclesiastes": "Eccl", "Song of Solomon": "Song", "Isaiah": "Isa",
+    "Jeremiah": "Jer", "Lamentations": "Lam", "Ezekiel": "Ezek", "Daniel": "Dan", "Hosea": "Hos",
+    "Joel": "Joel", "Amos": "Amos", "Obadiah": "Obad", "Jonah": "Jonah", "Micah": "Mic",
+    "Nahum": "Nah", "Habakkuk": "Hab", "Zephaniah": "Zeph", "Haggai": "Hag", "Zechariah": "Zech",
+    "Malachi": "Mal", "Matthew": "Matt", "Mark": "Mark", "Luke": "Luke", "John": "John",
+    "Acts": "Acts", "Romans": "Rom", "1 Corinthians": "1Cor", "2 Corinthians": "2Cor",
+    "Galatians": "Gal", "Ephesians": "Eph", "Philippians": "Phil", "Colossians": "Col",
+    "1 Thessalonians": "1Thess", "2 Thessalonians": "2Thess", "1 Timothy": "1Tim", "2 Timothy": "2Tim",
+    "Titus": "Titus", "Philemon": "Phlm", "Hebrews": "Heb", "James": "Jas", "1 Peter": "1Pet",
+    "2 Peter": "2Pet", "1 John": "1John", "2 John": "2John", "3 John": "3John", "Jude": "Jude",
+    "Revelation": "Rev"
+  };
+  var ABBR_TO_FULL = {};
+  Object.keys(FULL_TO_ABBR).forEach(function (full) { ABBR_TO_FULL[FULL_TO_ABBR[full]] = full; });
 
   var nivData = null;
+
+  // ============================================================
+  // Shared: IndexedDB-backed data loading (one picker for everything)
+  // ============================================================
   var dataBox = document.getElementById("data-box");
   var dataStatus = document.getElementById("data-status");
   var dataFile = document.getElementById("data-file");
+  var dataGate = document.getElementById("data-gate");
+  var appEl = document.getElementById("app");
 
   function openDb() {
     return new Promise(function (resolve, reject) {
@@ -278,7 +668,6 @@
       req.onerror = function () { reject(req.error); };
     });
   }
-
   function idbGet(key) {
     return openDb().then(function (db) {
       return new Promise(function (resolve, reject) {
@@ -289,7 +678,6 @@
       });
     });
   }
-
   function idbSet(key, value) {
     return openDb().then(function (db) {
       return new Promise(function (resolve, reject) {
@@ -302,11 +690,15 @@
   }
 
   function refreshDataUI(loaded) {
-    dataBox.style.display = loaded ? "none" : "block";
+    dataGate.style.display = loaded ? "none" : "block";
+    appEl.style.display = loaded ? "block" : "none";
     if (!loaded) {
-      dataStatus.textContent = "Select your NIV data file (niv.json) to enable verse lookups. It's remembered in this browser afterward - never uploaded anywhere.";
+      dataStatus.textContent = "Select your NIV data file (niv.json) to get started. It's remembered in this browser afterward - never uploaded anywhere.";
       nivData = null;
+      return;
     }
+    initReader();
+    renderCommentsColumn();
   }
 
   dataFile.addEventListener("change", function () {
@@ -338,6 +730,181 @@
       refreshDataUI(false);
     }
   }).catch(function () { refreshDataUI(false); });
+
+  // ============================================================
+  // Shared: cross references + verse range helpers
+  // ============================================================
+  var xrefData = null;
+  var xrefFetchPromise = null;
+  function loadXrefData() {
+    if (xrefData) return Promise.resolve(xrefData);
+    if (xrefFetchPromise) return xrefFetchPromise;
+    xrefFetchPromise = fetch("data/cross_references.json").then(function (res) {
+      if (!res.ok) throw new Error("fetch failed: " + res.status);
+      return res.json();
+    }).then(function (json) {
+      xrefData = json;
+      return xrefData;
+    });
+    return xrefFetchPromise;
+  }
+
+  function chapterNumbers(book) {
+    var chapters = nivData && nivData[book];
+    if (!chapters) return [];
+    return Object.keys(chapters).map(function (c) { return parseInt(c, 10); })
+      .sort(function (a, b) { return a - b; });
+  }
+
+  function nextChapterRef(book, chapter) {
+    var chapters = chapterNumbers(book);
+    var idx = chapters.indexOf(chapter);
+    if (idx !== -1 && idx + 1 < chapters.length) {
+      return { book: book, chapter: chapters[idx + 1] };
+    }
+    var bookIdx = BOOKS_IN_ORDER.indexOf(book);
+    for (var i = bookIdx + 1; i < BOOKS_IN_ORDER.length; i++) {
+      var nb = BOOKS_IN_ORDER[i];
+      var nChapters = chapterNumbers(nb);
+      if (nChapters.length) return { book: nb, chapter: nChapters[0] };
+    }
+    return null;
+  }
+
+  function collectRangeVerses(startBook, startCh, startV, endBook, endCh, endV) {
+    var out = [];
+    var book = startBook, chapter = startCh, verse = startV;
+    var guard = 0;
+    while (guard++ < 80) {
+      var chapterVerses = nivData[book] && nivData[book][chapter];
+      if (!chapterVerses) break;
+      var text = chapterVerses[String(verse)];
+      if (text) out.push({ book: book, chapter: chapter, verse: verse, text: text });
+      if (book === endBook && chapter === endCh && verse === endV) break;
+      var verseNums = Object.keys(chapterVerses).map(Number).sort(function (a, b) { return a - b; });
+      var vIdx = verseNums.indexOf(verse);
+      if (vIdx !== -1 && vIdx + 1 < verseNums.length) {
+        verse = verseNums[vIdx + 1];
+      } else {
+        var nxt = nextChapterRef(book, chapter);
+        if (!nxt) break;
+        book = nxt.book;
+        chapter = nxt.chapter;
+        var nextVerseNums = Object.keys(nivData[book][chapter]).map(Number).sort(function (a, b) { return a - b; });
+        verse = nextVerseNums[0];
+      }
+    }
+    return out;
+  }
+
+  function formatXrefLabel(sb, sc, sv, eb, ec, ev) {
+    if (sb === eb && sc === ec && sv === ev) return sb + " " + sc + ":" + sv;
+    if (sb === eb && sc === ec) return sb + " " + sc + ":" + sv + "-" + ev;
+    if (sb === eb) return sb + " " + sc + ":" + sv + "-" + ec + ":" + ev;
+    return sb + " " + sc + ":" + sv + " - " + eb + " " + ec + ":" + ev;
+  }
+
+  function buildVerseLine(book, chapter, verse, text) {
+    var line = document.createElement("span");
+    line.className = "result-verse";
+
+    var refEl = document.createElement("a");
+    refEl.className = "verse-ref";
+    refEl.href = "#";
+    refEl.textContent = book + " " + chapter + ":" + verse + " ";
+    refEl.addEventListener("click", function (e) {
+      e.preventDefault();
+      goToVerseInRead(book, chapter, verse);
+    });
+    line.appendChild(refEl);
+
+    line.appendChild(document.createTextNode(text));
+    return line;
+  }
+
+  // ============================================================
+  // Column navigation (swipe/tap between Search, Read, Comments)
+  // ============================================================
+  var columnsWrap = document.getElementById("columns-wrap");
+  var columnTabs = document.querySelectorAll(".column-tab");
+
+  function scrollToColumn(id) {
+    var col = document.getElementById(id);
+    if (!col) return;
+    col.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
+  }
+
+  columnTabs.forEach(function (tab) {
+    tab.addEventListener("click", function () { scrollToColumn(tab.getAttribute("data-target")); });
+  });
+
+  function updateActiveColumnTab() {
+    var mid = columnsWrap.scrollLeft + columnsWrap.clientWidth / 2;
+    var best = null, bestDist = Infinity;
+    ["col-search", "col-read", "col-comments"].forEach(function (id) {
+      var col = document.getElementById(id);
+      var center = col.offsetLeft + col.clientWidth / 2;
+      var dist = Math.abs(center - mid);
+      if (dist < bestDist) { bestDist = dist; best = id; }
+    });
+    columnTabs.forEach(function (tab) {
+      tab.classList.toggle("active", tab.getAttribute("data-target") === best);
+    });
+  }
+  var tabUpdateScheduled = false;
+  columnsWrap.addEventListener("scroll", function () {
+    if (tabUpdateScheduled) return;
+    tabUpdateScheduled = true;
+    requestAnimationFrame(function () {
+      tabUpdateScheduled = false;
+      updateActiveColumnTab();
+    });
+  }, { passive: true });
+  updateActiveColumnTab();
+
+  function goToVerseInRead(book, chapter, verse) {
+    scrollToColumn("col-read");
+    navigateViaLink(book, chapter);
+    if (verse) {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          var section = document.getElementById(sectionId(book, chapter));
+          var sup = section && Array.prototype.find.call(
+            section.querySelectorAll("sup.verse-num"),
+            function (s) { return s.textContent === String(verse); }
+          );
+          if (sup) sup.scrollIntoView({ block: "center" });
+        });
+      });
+    }
+  }
+
+  // ============================================================
+  // Search column
+  // ============================================================
+  var resultsRenderedForQuery = false;
+  var stuckTimer = null;
+
+  var BIBLE_BOOKS = [
+    "genesis", "exodus", "leviticus", "numbers", "deuteronomy", "joshua", "judges", "ruth",
+    "1 samuel", "2 samuel", "1 kings", "2 kings", "1 chronicles", "2 chronicles",
+    "ezra", "nehemiah", "esther", "job", "psalm", "psalms", "proverbs", "ecclesiastes",
+    "song of solomon", "song of songs", "isaiah", "jeremiah", "lamentations", "ezekiel",
+    "daniel", "hosea", "joel", "amos", "obadiah", "jonah", "micah", "nahum", "habakkuk",
+    "zephaniah", "haggai", "zechariah", "malachi", "matthew", "mark", "luke", "john", "acts",
+    "romans", "1 corinthians", "2 corinthians", "galatians", "ephesians", "philippians",
+    "colossians", "1 thessalonians", "2 thessalonians", "1 timothy", "2 timothy", "titus",
+    "philemon", "hebrews", "james", "1 peter", "2 peter", "1 john", "2 john", "3 john",
+    "jude", "revelation"
+  ];
+  var BOOK_PATTERN = new RegExp(
+    "\\b(" + BIBLE_BOOKS.map(function (b) { return b.replace(/\s+/g, "\\s+"); }).join("|") + ")\\b",
+    "i"
+  );
+
+  function mentionsBibleBook(text) {
+    return BOOK_PATTERN.test(text || "");
+  }
 
   var BOOK_ALIASES = {
     "genesis": "Genesis", "exodus": "Exodus", "leviticus": "Leviticus", "numbers": "Numbers",
@@ -382,24 +949,6 @@
     return verses[ref.verse] || null;
   }
 
-  function readUrl(book, chapter, verse) {
-    return "read.html?book=" + encodeURIComponent(book) + "&chapter=" + chapter + "&verse=" + verse;
-  }
-
-  function buildVerseLine(book, chapter, verse, text) {
-    var line = document.createElement("span");
-    line.className = "result-verse";
-
-    var refEl = document.createElement("a");
-    refEl.className = "verse-ref";
-    refEl.href = readUrl(book, chapter, verse);
-    refEl.textContent = book + " " + chapter + ":" + verse + " ";
-    line.appendChild(refEl);
-
-    line.appendChild(document.createTextNode(text));
-    return line;
-  }
-
   function getChapterVerses(book, chapter) {
     var chapters = nivData && nivData[book];
     var verses = chapters && chapters[String(chapter)];
@@ -408,108 +957,6 @@
       .map(function (v) { return parseInt(v, 10); })
       .sort(function (a, b) { return a - b; })
       .map(function (v) { return { verse: v, text: verses[String(v)] }; });
-  }
-
-  var BOOKS_IN_ORDER = [
-    "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth",
-    "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles",
-    "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon",
-    "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah",
-    "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi",
-    "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians",
-    "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians",
-    "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews", "James", "1 Peter", "2 Peter",
-    "1 John", "2 John", "3 John", "Jude", "Revelation"
-  ];
-
-  var FULL_TO_ABBR = {
-    "Genesis": "Gen", "Exodus": "Exod", "Leviticus": "Lev", "Numbers": "Num", "Deuteronomy": "Deut",
-    "Joshua": "Josh", "Judges": "Judg", "Ruth": "Ruth", "1 Samuel": "1Sam", "2 Samuel": "2Sam",
-    "1 Kings": "1Kgs", "2 Kings": "2Kgs", "1 Chronicles": "1Chr", "2 Chronicles": "2Chr",
-    "Ezra": "Ezra", "Nehemiah": "Neh", "Esther": "Esth", "Job": "Job", "Psalms": "Ps",
-    "Proverbs": "Prov", "Ecclesiastes": "Eccl", "Song of Solomon": "Song", "Isaiah": "Isa",
-    "Jeremiah": "Jer", "Lamentations": "Lam", "Ezekiel": "Ezek", "Daniel": "Dan", "Hosea": "Hos",
-    "Joel": "Joel", "Amos": "Amos", "Obadiah": "Obad", "Jonah": "Jonah", "Micah": "Mic",
-    "Nahum": "Nah", "Habakkuk": "Hab", "Zephaniah": "Zeph", "Haggai": "Hag", "Zechariah": "Zech",
-    "Malachi": "Mal", "Matthew": "Matt", "Mark": "Mark", "Luke": "Luke", "John": "John",
-    "Acts": "Acts", "Romans": "Rom", "1 Corinthians": "1Cor", "2 Corinthians": "2Cor",
-    "Galatians": "Gal", "Ephesians": "Eph", "Philippians": "Phil", "Colossians": "Col",
-    "1 Thessalonians": "1Thess", "2 Thessalonians": "2Thess", "1 Timothy": "1Tim", "2 Timothy": "2Tim",
-    "Titus": "Titus", "Philemon": "Phlm", "Hebrews": "Heb", "James": "Jas", "1 Peter": "1Pet",
-    "2 Peter": "2Pet", "1 John": "1John", "2 John": "2John", "3 John": "3John", "Jude": "Jude",
-    "Revelation": "Rev"
-  };
-  var ABBR_TO_FULL = {};
-  Object.keys(FULL_TO_ABBR).forEach(function (full) { ABBR_TO_FULL[FULL_TO_ABBR[full]] = full; });
-
-  var xrefData = null;
-  var xrefFetchPromise = null;
-  function loadXrefData() {
-    if (xrefData) return Promise.resolve(xrefData);
-    if (xrefFetchPromise) return xrefFetchPromise;
-    xrefFetchPromise = fetch("data/cross_references.json").then(function (res) {
-      if (!res.ok) throw new Error("fetch failed: " + res.status);
-      return res.json();
-    }).then(function (json) {
-      xrefData = json;
-      return xrefData;
-    });
-    return xrefFetchPromise;
-  }
-
-  function chapterNumbersIdx(book) {
-    var chapters = nivData && nivData[book];
-    if (!chapters) return [];
-    return Object.keys(chapters).map(function (c) { return parseInt(c, 10); })
-      .sort(function (a, b) { return a - b; });
-  }
-
-  function nextChapterRef(book, chapter) {
-    var chapters = chapterNumbersIdx(book);
-    var idx = chapters.indexOf(chapter);
-    if (idx !== -1 && idx + 1 < chapters.length) {
-      return { book: book, chapter: chapters[idx + 1] };
-    }
-    var bookIdx = BOOKS_IN_ORDER.indexOf(book);
-    for (var i = bookIdx + 1; i < BOOKS_IN_ORDER.length; i++) {
-      var nb = BOOKS_IN_ORDER[i];
-      var nChapters = chapterNumbersIdx(nb);
-      if (nChapters.length) return { book: nb, chapter: nChapters[0] };
-    }
-    return null;
-  }
-
-  function collectRangeVerses(startBook, startCh, startV, endBook, endCh, endV) {
-    var out = [];
-    var book = startBook, chapter = startCh, verse = startV;
-    var guard = 0;
-    while (guard++ < 80) {
-      var chapterVerses = nivData[book] && nivData[book][chapter];
-      if (!chapterVerses) break;
-      var text = chapterVerses[String(verse)];
-      if (text) out.push({ book: book, chapter: chapter, verse: verse, text: text });
-      if (book === endBook && chapter === endCh && verse === endV) break;
-      var verseNums = Object.keys(chapterVerses).map(Number).sort(function (a, b) { return a - b; });
-      var vIdx = verseNums.indexOf(verse);
-      if (vIdx !== -1 && vIdx + 1 < verseNums.length) {
-        verse = verseNums[vIdx + 1];
-      } else {
-        var nxt = nextChapterRef(book, chapter);
-        if (!nxt) break;
-        book = nxt.book;
-        chapter = nxt.chapter;
-        var nextVerseNums = Object.keys(nivData[book][chapter]).map(Number).sort(function (a, b) { return a - b; });
-        verse = nextVerseNums[0];
-      }
-    }
-    return out;
-  }
-
-  function formatXrefLabel(sb, sc, sv, eb, ec, ev) {
-    if (sb === eb && sc === ec && sv === ev) return sb + " " + sc + ":" + sv;
-    if (sb === eb && sc === ec) return sb + " " + sc + ":" + sv + "-" + ev;
-    if (sb === eb) return sb + " " + sc + ":" + sv + "-" + ec + ":" + ev;
-    return sb + " " + sc + ":" + sv + " - " + eb + " " + ec + ":" + ev;
   }
 
   function renderXrefEntries(container, ref) {
@@ -529,8 +976,9 @@
 
       var label = document.createElement("a");
       label.className = "xref-entry-label";
-      label.href = readUrl(sb, sc, sv);
+      label.href = "#";
       label.textContent = formatXrefLabel(sb, sc, sv, eb, ec, ev);
+      label.addEventListener("click", function (e2) { e2.preventDefault(); goToVerseInRead(sb, sc, sv); });
       entryEl.appendChild(label);
 
       var verses = collectRangeVerses(sb, sc, sv, eb, ec, ev);
@@ -548,7 +996,6 @@
     });
   }
 
-  // Google may hand back HTML-highlighted titles; strip tags without executing any script content.
   function stripHtml(html) {
     if (!html) return "";
     return new DOMParser().parseFromString(html, "text/html").body.textContent || "";
@@ -562,8 +1009,6 @@
     };
   }
 
-  // Reads whatever Google has currently rendered into its own (hidden) results DOM.
-  // Used for pages 2/3, which the widget does not surface through searchCallbacks.
   function scrapeVisibleResults() {
     var nodes = document.querySelectorAll(".gsc-webResult.gsc-result");
     var out = [];
@@ -615,9 +1060,6 @@
     });
   }
 
-  // Google's element widget only reports page 1 through searchCallbacks.ready; pages 2+
-  // are fetched by simulating clicks on its own (hidden) pagination and scraping the DOM.
-  // onPage(itemsSoFar) fires after each page so the list can render progressively.
   function fetchAdditionalPages(maxPage, onPage) {
     var allExtra = [];
     var chain = Promise.resolve();
@@ -796,9 +1238,6 @@
           resultsRenderedForQuery = false;
           document.body.classList.remove("results-stuck");
           clearTimeout(stuckTimer);
-          // If "ready" hasn't fired after a few seconds, Google may be showing a
-          // CAPTCHA/"unusual traffic" challenge in its (normally hidden) native UI
-          // instead - reveal it so that's visible and solvable rather than hidden forever.
           stuckTimer = setTimeout(function () {
             document.body.classList.add("results-stuck");
           }, 4000);
@@ -806,10 +1245,6 @@
           document.getElementById("results-list").innerHTML = "";
         },
         ready: function (googName, query, promotions, results) {
-          // Google's widget can re-fire "ready" as it lazily loads more results while
-          // the (hidden) native results area is scrolled. Rebuilding the list on every
-          // firing collapses expanded verses and resets scroll position, so only the
-          // first firing per query kicks off rendering.
           if (resultsRenderedForQuery) return;
           clearTimeout(stuckTimer);
           document.body.classList.remove("results-stuck");
@@ -829,6 +1264,664 @@
       }
     }
   };
+
+  // ============================================================
+  // Read column
+  // ============================================================
+  var ALL_CHAPTERS = [];
+  var currentIndex = -1;
+  var sectionObserver = null;
+  var suppressObserver = false;
+  var readerInited = false;
+
+  var readColumn = document.getElementById("col-read");
+  var reader = document.getElementById("reader");
+  var bookSelect = document.getElementById("book-select");
+  var chapterSelect = document.getElementById("chapter-select");
+  var prevBtn = document.getElementById("prev-chapter");
+  var nextBtn = document.getElementById("next-chapter");
+  var textEl = document.getElementById("bible-text");
+  var emptyEl = document.getElementById("bible-empty");
+  var selectionMenu = document.getElementById("selection-menu");
+  var selectionHighlightBtn = document.getElementById("selection-highlight-btn");
+  var selectionHighlightVerseBtn = document.getElementById("selection-highlight-verse-btn");
+
+  var commentOverlay = document.getElementById("comment-overlay");
+  var commentInput = document.getElementById("comment-input");
+  var commentRemoveBtn = document.getElementById("comment-remove");
+  var highlightRemoveBtn = document.getElementById("highlight-remove");
+  var activeCommentMark = null;
+
+  function openCommentEditor(mark) {
+    hideSelectionMenu();
+    activeCommentMark = mark;
+    commentInput.value = mark.getAttribute("data-comment") || "";
+    commentOverlay.style.display = "block";
+  }
+  function closeCommentEditor() {
+    applyComment(commentInput.value);
+    commentOverlay.style.display = "none";
+    activeCommentMark = null;
+  }
+  function applyComment(text) {
+    if (!activeCommentMark) return;
+    var mark = activeCommentMark;
+    var section = mark.closest(".chapter-section");
+    if (text && text.trim()) {
+      mark.setAttribute("data-comment", text);
+      mark.title = text;
+      mark.classList.add("commented");
+    } else {
+      mark.removeAttribute("data-comment");
+      mark.removeAttribute("title");
+      mark.classList.remove("commented");
+    }
+    if (section) saveHighlightState(section);
+    renderCommentsColumn();
+  }
+  function removeHighlightMark(mark) {
+    var section = mark.closest(".chapter-section");
+    var parent = mark.parentNode;
+    while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+    parent.removeChild(mark);
+    parent.normalize();
+    if (section) saveHighlightState(section);
+    renderCommentsColumn();
+  }
+
+  var commentSaveScheduled = false;
+  commentInput.addEventListener("input", function () {
+    if (commentSaveScheduled) return;
+    commentSaveScheduled = true;
+    requestAnimationFrame(function () {
+      commentSaveScheduled = false;
+      applyComment(commentInput.value);
+    });
+  });
+  commentRemoveBtn.addEventListener("click", function () {
+    commentInput.value = "";
+    closeCommentEditor();
+  });
+  highlightRemoveBtn.addEventListener("click", function () {
+    if (activeCommentMark) removeHighlightMark(activeCommentMark);
+    activeCommentMark = null;
+    commentOverlay.style.display = "none";
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && commentOverlay.style.display !== "none") closeCommentEditor();
+  });
+  document.addEventListener("mousedown", function (e) {
+    if (commentOverlay.style.display === "none") return;
+    if (commentOverlay.contains(e.target)) return;
+    closeCommentEditor();
+  });
+
+  function highlightKey(book, chapter) {
+    return HIGHLIGHT_PREFIX + book + ":" + chapter;
+  }
+  function sectionId(book, chapter) {
+    return "ch-" + book.replace(/\s+/g, "_") + "-" + chapter;
+  }
+
+  function renderWholeBible() {
+    ALL_CHAPTERS = [];
+    var html = "";
+    BOOKS_IN_ORDER.forEach(function (book) {
+      if (!nivData[book]) return;
+      html += '<h2 class="book-heading">' + book + '</h2>';
+      chapterNumbers(book).forEach(function (chapter) {
+        ALL_CHAPTERS.push({ book: book, chapter: chapter });
+        var key = highlightKey(book, chapter);
+        var saved = localStorage.getItem(key);
+        html += '<section class="chapter-section" id="' + sectionId(book, chapter) + '" data-book="' + book + '" data-chapter="' + chapter + '">';
+        html += '<h3 class="chapter-heading">' + book + ' ' + chapter + '</h3>';
+        html += '<div class="verse-flow">';
+        if (saved) {
+          html += saved;
+        } else {
+          var verses = nivData[book][chapter];
+          var verseNums = Object.keys(verses).map(function (v) { return parseInt(v, 10); })
+            .sort(function (a, b) { return a - b; });
+          verseNums.forEach(function (v) {
+            html += '<sup class="verse-num">' + v + '</sup>' + verses[String(v)] + " ";
+          });
+        }
+        html += '</div></section>';
+      });
+    });
+    textEl.innerHTML = html;
+    setupObserver();
+  }
+
+  function setupObserver() {
+    if (sectionObserver) sectionObserver.disconnect();
+    sectionObserver = new IntersectionObserver(function (entries) {
+      if (suppressObserver) return;
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        var book = entry.target.getAttribute("data-book");
+        var chapter = parseInt(entry.target.getAttribute("data-chapter"), 10);
+        setCurrent(book, chapter, false);
+      });
+    }, { root: readColumn, rootMargin: "-10% 0px -80% 0px" });
+    document.querySelectorAll(".chapter-section").forEach(function (el) { sectionObserver.observe(el); });
+  }
+
+  function populateBooks() {
+    bookSelect.innerHTML = "";
+    BOOKS_IN_ORDER.forEach(function (book) {
+      if (!nivData[book]) return;
+      var opt = document.createElement("option");
+      opt.value = book;
+      opt.textContent = book;
+      bookSelect.appendChild(opt);
+    });
+  }
+  function populateChapterOptions(book) {
+    var chapters = chapterNumbers(book);
+    chapterSelect.innerHTML = "";
+    chapters.forEach(function (c) {
+      var opt = document.createElement("option");
+      opt.value = String(c);
+      opt.textContent = "Chapter " + c;
+      chapterSelect.appendChild(opt);
+    });
+  }
+
+  function setCurrent(book, chapter, scrollTo) {
+    var idx = ALL_CHAPTERS.findIndex(function (c) { return c.book === book && c.chapter === chapter; });
+    if (idx === -1) return;
+    currentIndex = idx;
+
+    if (bookSelect.value !== book) {
+      bookSelect.value = book;
+      populateChapterOptions(book);
+    }
+    chapterSelect.value = String(chapter);
+
+    localStorage.setItem("read:lastBook", book);
+    localStorage.setItem("read:lastChapter:" + book, String(chapter));
+
+    if (scrollTo) {
+      suppressObserver = true;
+      document.getElementById(sectionId(book, chapter)).scrollIntoView({ behavior: "auto", block: "start" });
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          suppressObserver = false;
+        });
+      });
+    }
+  }
+
+  function goTo(book, chapter) { setCurrent(book, chapter, true); }
+
+  var navHistory = [];
+  var navHistoryIndex = -1;
+
+  function updateNavHistoryButtons() {
+    prevBtn.disabled = navHistoryIndex <= 0;
+    nextBtn.disabled = navHistoryIndex >= navHistory.length - 1;
+  }
+
+  function navigateViaLink(book, chapter) {
+    var current = currentIndex !== -1 ? ALL_CHAPTERS[currentIndex] : null;
+    navHistory = navHistory.slice(0, navHistoryIndex + 1);
+    var top = navHistory[navHistory.length - 1];
+    if (current && (!top || top.book !== current.book || top.chapter !== current.chapter)) {
+      navHistory.push({ book: current.book, chapter: current.chapter });
+    }
+    navHistory.push({ book: book, chapter: chapter });
+    navHistoryIndex = navHistory.length - 1;
+    goTo(book, chapter);
+    updateNavHistoryButtons();
+  }
+
+  function saveHighlightState(sectionEl) {
+    var book = sectionEl.getAttribute("data-book");
+    var chapter = sectionEl.getAttribute("data-chapter");
+    var flow = sectionEl.querySelector(".verse-flow");
+    localStorage.setItem(highlightKey(book, chapter), flow.innerHTML);
+  }
+
+  function wrapRangeInMark(range) {
+    var mark = document.createElement("mark");
+    mark.className = "highlight";
+    try {
+      range.surroundContents(mark);
+    } catch (e) {
+      var contents = range.extractContents();
+      mark.appendChild(contents);
+      range.insertNode(mark);
+    }
+  }
+
+  function hideSelectionMenu() { selectionMenu.style.display = "none"; }
+  function positionSelectionMenu() { selectionMenu.style.display = "flex"; }
+
+  function checkSelectionForMenu(clickX, clickY) {
+    var hasCoords = typeof clickX === "number";
+    if (commentOverlay.style.display !== "none") {
+      hideSelectionMenu();
+      return;
+    }
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) {
+      hideSelectionMenu();
+      return;
+    }
+    if (sel.isCollapsed && !hasCoords) {
+      return;
+    }
+    var range = sel.getRangeAt(0);
+    var node = range.commonAncestorContainer;
+    var el = node.nodeType === 1 ? node : node.parentElement;
+    if (!el || !textEl.contains(el) || !findSelectionVerseRef()) {
+      hideSelectionMenu();
+      return;
+    }
+    if (sel.isCollapsed && hasCoords) {
+      var flow = el.closest ? el.closest(".verse-flow") : null;
+      var flowRect = flow && flow.getBoundingClientRect();
+      var tolerance = 16;
+      var withinFlow = flowRect &&
+        clickY >= flowRect.top - tolerance && clickY <= flowRect.bottom + tolerance;
+      if (!withinFlow) {
+        hideSelectionMenu();
+        return;
+      }
+    }
+    selectionHighlightBtn.style.display = sel.isCollapsed ? "none" : "";
+    selectionHighlightVerseBtn.style.display = sel.isCollapsed ? "" : "none";
+    positionSelectionMenu();
+  }
+
+  var lastTouchTime = 0;
+  var textTouchStartX = null, textTouchStartY = null;
+  textEl.addEventListener("touchstart", function (e) {
+    var t = e.touches[0];
+    textTouchStartX = t.clientX;
+    textTouchStartY = t.clientY;
+  }, { passive: true });
+  textEl.addEventListener("mouseup", function (e) {
+    if (Date.now() - lastTouchTime < 600) return;
+    var clickX = e.clientX, clickY = e.clientY;
+    requestAnimationFrame(function () { checkSelectionForMenu(clickX, clickY); });
+  });
+  textEl.addEventListener("touchend", function (e) {
+    lastTouchTime = Date.now();
+    var t = e.changedTouches && e.changedTouches[0];
+    if (!t) return;
+    // A scroll/pan also ends with a touchend on the text - only treat this as a
+    // tap (and possibly show the menu) if the finger barely moved from where it
+    // started; otherwise it was scrolling, not tapping a verse.
+    if (textTouchStartX !== null) {
+      var moveX = t.clientX - textTouchStartX;
+      var moveY = t.clientY - textTouchStartY;
+      textTouchStartX = null;
+      if (Math.abs(moveX) > 10 || Math.abs(moveY) > 10) return;
+    }
+    var clickX = t.clientX, clickY = t.clientY;
+    requestAnimationFrame(function () { checkSelectionForMenu(clickX, clickY); });
+  });
+
+  var selectionChangeScheduled = false;
+  document.addEventListener("selectionchange", function () {
+    if (selectionChangeScheduled) return;
+    selectionChangeScheduled = true;
+    requestAnimationFrame(function () {
+      selectionChangeScheduled = false;
+      checkSelectionForMenu();
+    });
+  });
+
+  document.addEventListener("mousedown", function (e) {
+    if (Date.now() - lastTouchTime < 600) return;
+    if (selectionMenu.contains(e.target) || textEl.contains(e.target)) return;
+    hideSelectionMenu();
+  });
+
+  selectionHighlightBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+  selectionHighlightBtn.addEventListener("click", function () {
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+      hideSelectionMenu();
+      return;
+    }
+    var range = sel.getRangeAt(0);
+    var section = range.commonAncestorContainer;
+    section = section.nodeType === 1 ? section.closest(".chapter-section") : section.parentElement.closest(".chapter-section");
+    hideSelectionMenu();
+    if (!section) return;
+    wrapRangeInMark(range);
+    sel.removeAllRanges();
+    saveHighlightState(section);
+  });
+
+  function findVerseRange(section, verseNum) {
+    var flow = section.querySelector(".verse-flow");
+    if (!flow) return null;
+    var sups = Array.from(flow.querySelectorAll("sup.verse-num"));
+    var idx = sups.findIndex(function (s) { return s.textContent === String(verseNum); });
+    if (idx === -1) return null;
+    var range = document.createRange();
+    range.setStartAfter(sups[idx]);
+    if (sups[idx + 1]) {
+      range.setEndBefore(sups[idx + 1]);
+    } else {
+      range.setEnd(flow, flow.childNodes.length);
+    }
+    return range;
+  }
+
+  selectionHighlightVerseBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+  selectionHighlightVerseBtn.addEventListener("click", function () {
+    var ref = findSelectionVerseRef();
+    hideSelectionMenu();
+    if (!ref) return;
+    var section = document.getElementById(sectionId(ref.book, ref.chapter));
+    if (!section) return;
+    var range = findVerseRange(section, ref.verse);
+    if (!range) return;
+    wrapRangeInMark(range);
+    window.getSelection().removeAllRanges();
+    saveHighlightState(section);
+  });
+
+  textEl.addEventListener("click", function (e) {
+    var mark = e.target.closest ? e.target.closest("mark.highlight") : null;
+    if (!mark) return;
+    openCommentEditor(mark);
+  });
+
+  var BIBLEHUB_SLUGS = { "Song of Solomon": "songs" };
+  function bibleHubSlug(book) {
+    return BIBLEHUB_SLUGS[book] || book.toLowerCase().replace(/\s+/g, "_");
+  }
+
+  function findSelectionVerseRef() {
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    var range = sel.getRangeAt(0);
+    var startNode = range.startContainer;
+    var startEl = startNode.nodeType === 1 ? startNode : startNode.parentElement;
+    var section = startEl ? startEl.closest(".chapter-section") : null;
+    var flow = section ? section.querySelector(".verse-flow") : null;
+    if (!flow) return null;
+
+    var verse = null;
+    var walker = document.createTreeWalker(flow, NodeFilter.SHOW_ALL, null);
+    var node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeType === 1 && node.classList.contains("verse-num")) {
+        verse = node.textContent;
+      }
+      if (node === startNode || (node.nodeType === 1 && node.contains(startNode))) {
+        break;
+      }
+    }
+    if (verse === null) return null;
+    return { book: section.dataset.book, chapter: section.dataset.chapter, verse: verse };
+  }
+
+  var viewBibleHubBtn = document.getElementById("view-biblehub");
+  viewBibleHubBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+  viewBibleHubBtn.addEventListener("click", function () {
+    var ref = findSelectionVerseRef();
+    hideSelectionMenu();
+    if (!ref) return;
+    var url = "https://biblehub.com/" + bibleHubSlug(ref.book) + "/" + ref.chapter + "-" + ref.verse + ".htm";
+    window.open(url, "_blank");
+  });
+
+  var xrefOverlay = document.getElementById("xref-overlay");
+  var xrefList = document.getElementById("xref-list");
+  var xrefTitle = document.getElementById("xref-title");
+  var xrefCloseBtn = document.getElementById("xref-close");
+  var viewXrefsBtn = document.getElementById("view-xrefs");
+
+  function closeXrefOverlay() { xrefOverlay.style.display = "none"; }
+
+  function renderXrefList(ref, abbr) {
+    xrefTitle.textContent = "Cross References — " + ref.book + " " + ref.chapter + ":" + ref.verse;
+    var entries = (xrefData[abbr] && xrefData[abbr][String(ref.chapter)] && xrefData[abbr][String(ref.chapter)][String(ref.verse)]) || [];
+    if (!entries.length) {
+      xrefList.innerHTML = '<p class="xref-empty">No cross references found for this verse.</p>';
+      return;
+    }
+    xrefList.innerHTML = "";
+    entries.forEach(function (e) {
+      var sb = ABBR_TO_FULL[e[0]], sc = e[1], sv = e[2], eb = ABBR_TO_FULL[e[3]], ec = e[4], ev = e[5];
+      if (!sb || !eb) return;
+      var label = formatXrefLabel(sb, sc, sv, eb, ec, ev);
+      var verses = collectRangeVerses(sb, sc, sv, eb, ec, ev);
+
+      var entryEl = document.createElement("div");
+      entryEl.className = "xref-entry";
+
+      var btn = document.createElement("button");
+      btn.className = "xref-ref";
+      btn.type = "button";
+      btn.textContent = label;
+      btn.addEventListener("click", function () {
+        closeXrefOverlay();
+        navigateViaLink(sb, sc);
+      });
+      entryEl.appendChild(btn);
+
+      var textBox = document.createElement("div");
+      textBox.className = "xref-text";
+      if (verses.length) {
+        textBox.innerHTML = verses.map(function (v) {
+          return '<sup class="verse-num">' + v.verse + '</sup>' + v.text;
+        }).join(" ");
+      } else {
+        textBox.textContent = "(verse text unavailable)";
+      }
+      entryEl.appendChild(textBox);
+
+      xrefList.appendChild(entryEl);
+    });
+  }
+
+  viewXrefsBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+  viewXrefsBtn.addEventListener("click", function () {
+    var ref = findSelectionVerseRef();
+    hideSelectionMenu();
+    if (!ref) return;
+    var abbr = FULL_TO_ABBR[ref.book];
+    xrefOverlay.style.display = "flex";
+    xrefList.innerHTML = '<p class="xref-empty">Loading…</p>';
+    loadXrefData().then(function () {
+      renderXrefList(ref, abbr);
+    }).catch(function () {
+      xrefList.innerHTML = '<p class="xref-empty">Couldn’t load cross reference data.</p>';
+    });
+  });
+
+  xrefCloseBtn.addEventListener("click", closeXrefOverlay);
+  xrefOverlay.addEventListener("click", function (e) {
+    if (e.target === xrefOverlay) closeXrefOverlay();
+  });
+
+  bookSelect.addEventListener("change", function () {
+    populateChapterOptions(bookSelect.value);
+    var chapters = chapterNumbers(bookSelect.value);
+    navigateViaLink(bookSelect.value, chapters[0]);
+  });
+  chapterSelect.addEventListener("change", function () {
+    navigateViaLink(bookSelect.value, parseInt(chapterSelect.value, 10));
+  });
+
+  prevBtn.addEventListener("click", function () {
+    if (navHistoryIndex > 0) {
+      navHistoryIndex--;
+      var c = navHistory[navHistoryIndex];
+      setCurrent(c.book, c.chapter, true);
+      updateNavHistoryButtons();
+    }
+  });
+  nextBtn.addEventListener("click", function () {
+    if (navHistoryIndex < navHistory.length - 1) {
+      navHistoryIndex++;
+      var c = navHistory[navHistoryIndex];
+      setCurrent(c.book, c.chapter, true);
+      updateNavHistoryButtons();
+    }
+  });
+
+  var navBarEl = document.querySelector(".nav-bar");
+  var lastScrollY = 0;
+  var navScrollScheduled = false;
+  function updateNavBarVisibility() {
+    var y = readColumn.scrollTop;
+    if (y > lastScrollY && y > navBarEl.offsetHeight) {
+      navBarEl.classList.add("nav-hidden");
+    } else if (y < lastScrollY) {
+      navBarEl.classList.remove("nav-hidden");
+    }
+    lastScrollY = y;
+  }
+  readColumn.addEventListener("scroll", function () {
+    if (navScrollScheduled) return;
+    navScrollScheduled = true;
+    requestAnimationFrame(function () {
+      navScrollScheduled = false;
+      updateNavBarVisibility();
+    });
+  }, { passive: true });
+  readColumn.addEventListener("scroll", hideSelectionMenu, { passive: true });
+
+  var positionSaveScheduled = false;
+  function saveLastPosition() {
+    if (currentIndex === -1) return;
+    var cur = ALL_CHAPTERS[currentIndex];
+    var section = document.getElementById(sectionId(cur.book, cur.chapter));
+    if (!section) return;
+    var sups = section.querySelectorAll("sup.verse-num");
+    var navBarHeight = navBarEl.offsetHeight;
+    var verse = null;
+    for (var i = 0; i < sups.length; i++) {
+      if (sups[i].getBoundingClientRect().top >= navBarHeight) {
+        verse = sups[i].textContent;
+        break;
+      }
+    }
+    if (verse) localStorage.setItem("read:lastVerse:" + cur.book + ":" + cur.chapter, verse);
+  }
+  readColumn.addEventListener("scroll", function () {
+    if (positionSaveScheduled) return;
+    positionSaveScheduled = true;
+    requestAnimationFrame(function () {
+      positionSaveScheduled = false;
+      saveLastPosition();
+    });
+  }, { passive: true });
+
+  function getUrlVerseTarget() {
+    var params = new URLSearchParams(window.location.search);
+    var book = params.get("book");
+    var chapter = parseInt(params.get("chapter"), 10);
+    if (!book || !chapter) return null;
+    var verse = params.get("verse") ? parseInt(params.get("verse"), 10) : null;
+    return { book: book, chapter: chapter, verse: verse };
+  }
+
+  function initReader() {
+    if (readerInited) return;
+    readerInited = true;
+
+    populateBooks();
+    renderWholeBible();
+
+    var urlTarget = getUrlVerseTarget();
+    var lastBook = localStorage.getItem("read:lastBook");
+    var lastChapter = localStorage.getItem("read:lastChapter:" + lastBook);
+    var startBook = (urlTarget && nivData[urlTarget.book]) ? urlTarget.book
+      : (lastBook && nivData[lastBook]) ? lastBook : BOOKS_IN_ORDER[0];
+    var chapters = chapterNumbers(startBook);
+    var startChapter = (urlTarget && urlTarget.book === startBook && chapters.indexOf(urlTarget.chapter) !== -1) ? urlTarget.chapter
+      : (lastChapter && chapters.indexOf(parseInt(lastChapter, 10)) !== -1) ? parseInt(lastChapter, 10) : chapters[0];
+
+    var lastVerse = localStorage.getItem("read:lastVerse:" + startBook + ":" + startChapter);
+    var targetVerse = (urlTarget && urlTarget.book === startBook && urlTarget.chapter === startChapter) ? urlTarget.verse
+      : (!urlTarget && lastVerse) ? parseInt(lastVerse, 10) : null;
+
+    populateChapterOptions(startBook);
+    navHistory = [{ book: startBook, chapter: startChapter }];
+    navHistoryIndex = 0;
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        setCurrent(startBook, startChapter, true);
+        updateNavHistoryButtons();
+        if (targetVerse) {
+          var section = document.getElementById(sectionId(startBook, startChapter));
+          var sup = section && Array.prototype.find.call(
+            section.querySelectorAll("sup.verse-num"),
+            function (s) { return s.textContent === String(targetVerse); }
+          );
+          if (sup) sup.scrollIntoView({ block: "center" });
+        }
+        if (urlTarget) scrollToColumn("col-read");
+      });
+    });
+  }
+
+  // ============================================================
+  // Comments column
+  // ============================================================
+  var commentsList = document.getElementById("comments-list");
+  var commentsEmpty = document.getElementById("comments-empty");
+
+  function renderCommentsColumn() {
+    if (!nivData) return;
+    var cards = [];
+    BOOKS_IN_ORDER.forEach(function (book) {
+      if (!nivData[book]) return;
+      chapterNumbers(book).forEach(function (chapter) {
+        var saved = localStorage.getItem(highlightKey(book, chapter));
+        if (!saved || saved.indexOf("commented") === -1) return;
+        var temp = document.createElement("div");
+        temp.innerHTML = saved;
+        temp.querySelectorAll("mark.highlight.commented").forEach(function (mark) {
+          cards.push({
+            book: book,
+            chapter: chapter,
+            text: mark.getAttribute("data-comment") || "",
+            highlight: mark.textContent
+          });
+        });
+      });
+    });
+
+    commentsEmpty.style.display = cards.length ? "none" : "block";
+    commentsList.innerHTML = "";
+    cards.forEach(function (c) {
+      var card = document.createElement("div");
+      card.className = "comment-card";
+
+      var ref = document.createElement("div");
+      ref.className = "comment-card-ref";
+      ref.textContent = c.book + " " + c.chapter;
+      card.appendChild(ref);
+
+      var hl = document.createElement("div");
+      hl.className = "comment-card-highlight";
+      hl.textContent = "“" + c.highlight + "”";
+      card.appendChild(hl);
+
+      var text = document.createElement("div");
+      text.className = "comment-card-text";
+      text.textContent = c.text;
+      card.appendChild(text);
+
+      card.addEventListener("click", function () {
+        scrollToColumn("col-read");
+        navigateViaLink(c.book, c.chapter);
+      });
+
+      commentsList.appendChild(card);
+    });
+  }
 </script>
 <script async src="https://cse.google.com/cse.js?cx=c46bbd043c00a4bb7"></script>
 </body>
