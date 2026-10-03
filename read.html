@@ -916,9 +916,11 @@
     }
     // Without click coordinates (a selectionchange pass, used for mobile's handle-drag
     // selection UI, which never fires mouseup/touchend on the text itself) a bare caret
-    // tells us nothing about intent - only act on an actual dragged-out selection here.
+    // tells us nothing about intent - ignore it and leave whatever mouseup/touchend
+    // already decided alone, rather than hiding it out from under them. selectionchange
+    // can fire again right after those (its own rAF racing with theirs), and hiding
+    // here would otherwise immediately close a menu they had just correctly opened.
     if (sel.isCollapsed && !hasCoords) {
-      hideSelectionMenu();
       return;
     }
     var range = sel.getRangeAt(0);
@@ -928,15 +930,19 @@
       hideSelectionMenu();
       return;
     }
-    // A tap/click in blank space (margins, gaps between verses/chapters) still snaps
-    // the caret to the nearest letter - only treat it as "tapped on text" if the tap
-    // actually landed on (or very near) the resolved caret position.
+    // A tap/click in blank space (above a chapter heading, below its last verse)
+    // still snaps the caret to the nearest letter - comparing against the resolved
+    // caret's own tiny rect was too strict (ordinary clicks can land a line's worth
+    // of pixels from the exact character boundary and still clearly mean "this
+    // verse"), so instead just check the tap fell within the flowing text block
+    // itself, not in the dead space around it.
     if (sel.isCollapsed && hasCoords) {
-      var caretRect = range.getBoundingClientRect();
-      var tolerance = 10;
-      var closeEnough = clickY >= caretRect.top - tolerance && clickY <= caretRect.bottom + tolerance &&
-        clickX >= caretRect.left - tolerance && clickX <= caretRect.right + tolerance;
-      if (!closeEnough) {
+      var flow = el.closest ? el.closest(".verse-flow") : null;
+      var flowRect = flow && flow.getBoundingClientRect();
+      var tolerance = 16;
+      var withinFlow = flowRect &&
+        clickY >= flowRect.top - tolerance && clickY <= flowRect.bottom + tolerance;
+      if (!withinFlow) {
         hideSelectionMenu();
         return;
       }
