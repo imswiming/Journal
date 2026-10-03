@@ -98,14 +98,18 @@
     overflow-x: auto;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   }
+  .columns-wrap::-webkit-scrollbar { display: none; }
   .column {
     flex: 0 0 100vw;
     max-width: 100vw;
     scroll-snap-align: start;
     overflow-y: auto;
     height: 100%;
+    scrollbar-width: none;
   }
+  .column::-webkit-scrollbar { display: none; }
   .column-pad {
     padding: 1.25rem 1.25rem 3rem;
     max-width: 40rem;
@@ -128,7 +132,10 @@
     .column:last-child { border-right: none; }
     #col-search { flex: 1 1 0; min-width: 20rem; }
     #col-read { flex: 1.8 1 0; min-width: 28rem; }
-    #col-comments { flex: 1 1 0; min-width: 18rem; }
+    /* Cards are positioned to line up with their highlight's on-screen position
+       in Read, which only makes sense if this column isn't also scrolling on
+       its own. */
+    #col-comments { flex: 1 1 0; min-width: 18rem; overflow-y: hidden; }
   }
 
   /* ---------- Search column ---------- */
@@ -498,6 +505,7 @@
     padding: 0.7rem 0.85rem;
     margin-bottom: 0.75rem;
     cursor: pointer;
+    z-index: 4;
   }
   .comment-card .comment-card-ref {
     font-weight: 700;
@@ -1790,6 +1798,8 @@
     });
   }, { passive: true });
   readColumn.addEventListener("scroll", hideSelectionMenu, { passive: true });
+  readColumn.addEventListener("scroll", function () { scheduleCommentsLayout(); }, { passive: true });
+  window.addEventListener("resize", function () { scheduleCommentsLayout(); });
 
   var positionSaveScheduled = false;
   function saveLastPosition() {
@@ -1872,7 +1882,69 @@
   var commentsList = document.getElementById("comments-list");
   var commentsEmpty = document.getElementById("comments-empty");
 
-  function renderCommentsColumn() {
+  function isDesktopColumns() {
+    return window.matchMedia("(min-width: 1100px)").matches;
+  }
+
+  function buildCommentCard(refLabel, highlightText, commentText) {
+    var card = document.createElement("div");
+    card.className = "comment-card";
+
+    var ref = document.createElement("div");
+    ref.className = "comment-card-ref";
+    ref.textContent = refLabel;
+    card.appendChild(ref);
+
+    var hl = document.createElement("div");
+    hl.className = "comment-card-highlight";
+    hl.textContent = "“" + highlightText + "”";
+    card.appendChild(hl);
+
+    var text = document.createElement("div");
+    text.className = "comment-card-text";
+    text.textContent = commentText;
+    card.appendChild(text);
+
+    return card;
+  }
+
+  // Side by side with Read (desktop), comments sit level with the highlight
+  // they belong to - like a margin note - instead of a plain stacked list,
+  // and only for highlights currently on screen. On narrow screens Read and
+  // Comments are never visible at once, so there's nothing to line up against
+  // - it falls back to a plain scrollable list of every comment in the Bible.
+  function layoutCommentsDesktop() {
+    var marks = readerInited ? textEl.querySelectorAll("mark.highlight.commented") : [];
+    var cards = [];
+    marks.forEach(function (mark) {
+      var r = mark.getBoundingClientRect();
+      if (r.bottom < -200 || r.top > window.innerHeight + 200) return;
+      cards.push({ mark: mark, top: r.top });
+    });
+
+    commentsEmpty.style.display = cards.length ? "none" : "block";
+    commentsList.innerHTML = "";
+    commentsList.style.position = "static";
+    commentsList.style.minHeight = "";
+    // Fixed (viewport-relative) positioning, same as top: c.top would mean under
+    // position:fixed - matches mark.getBoundingClientRect() directly, with no
+    // offset-parent math needed, and stays correct regardless of what scrolls.
+    var colRect = commentsList.getBoundingClientRect();
+    cards.forEach(function (c) {
+      var mark = c.mark;
+      var section = mark.closest(".chapter-section");
+      var book = section.dataset.book, chapter = section.dataset.chapter;
+      var card = buildCommentCard(book + " " + chapter, mark.textContent, mark.getAttribute("data-comment") || "");
+      card.style.position = "fixed";
+      card.style.left = colRect.left + "px";
+      card.style.width = colRect.width + "px";
+      card.style.top = c.top + "px";
+      card.addEventListener("click", function () { openCommentEditor(mark); });
+      commentsList.appendChild(card);
+    });
+  }
+
+  function layoutCommentsList() {
     if (!nivData) return;
     var cards = [];
     BOOKS_IN_ORDER.forEach(function (book) {
@@ -1894,32 +1966,33 @@
     });
 
     commentsEmpty.style.display = cards.length ? "none" : "block";
+    commentsList.style.position = "static";
+    commentsList.style.minHeight = "";
     commentsList.innerHTML = "";
     cards.forEach(function (c) {
-      var card = document.createElement("div");
-      card.className = "comment-card";
-
-      var ref = document.createElement("div");
-      ref.className = "comment-card-ref";
-      ref.textContent = c.book + " " + c.chapter;
-      card.appendChild(ref);
-
-      var hl = document.createElement("div");
-      hl.className = "comment-card-highlight";
-      hl.textContent = "“" + c.highlight + "”";
-      card.appendChild(hl);
-
-      var text = document.createElement("div");
-      text.className = "comment-card-text";
-      text.textContent = c.text;
-      card.appendChild(text);
-
+      var card = buildCommentCard(c.book + " " + c.chapter, c.highlight, c.text);
       card.addEventListener("click", function () {
         scrollToColumn("col-read");
         navigateViaLink(c.book, c.chapter);
       });
-
       commentsList.appendChild(card);
+    });
+  }
+
+  function renderCommentsColumn() {
+    if (isDesktopColumns()) layoutCommentsDesktop();
+    else layoutCommentsList();
+  }
+  window.matchMedia("(min-width: 1100px)").addEventListener("change", renderCommentsColumn);
+
+  var commentsLayoutScheduled = false;
+  function scheduleCommentsLayout() {
+    if (!isDesktopColumns()) return;
+    if (commentsLayoutScheduled) return;
+    commentsLayoutScheduled = true;
+    requestAnimationFrame(function () {
+      commentsLayoutScheduled = false;
+      layoutCommentsDesktop();
     });
   }
 </script>
