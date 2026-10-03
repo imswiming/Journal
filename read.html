@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Read the Bible</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Figtree:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #eef2f6;
+    --panel: #ffffff;
+    --ink: #1c2a3a;
+    --muted: #5b6b7d;
+    --line: #c9d3de;
+    --accent: #2f5fd0;
+    --highlight: #fff3a0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141b24;
+      --panel: #1d2632;
+      --ink: #e4ebf3;
+      --muted: #93a3b6;
+      --line: #334155;
+      --accent: #7ea2ff;
+      --highlight: #6b5d1f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html {
+    background: var(--bg);
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    padding: 2rem 1.5rem;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex;
+    justify-content: center;
+  }
+  main { width: 100%; max-width: 42rem; }
+  h1 {
+    font-size: clamp(1.8rem, 5vw, 2.4rem);
+    font-weight: 800;
+    margin: 0 0 1.25rem;
+    letter-spacing: -0.02em;
+  }
+  .mode-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+  }
+  .mode-tab {
+    padding: 0.5rem 1rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    color: var(--ink);
+  }
+  .mode-tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1.25rem;
+  }
+  .data-panel { margin-bottom: 1rem; }
+  .data-panel #data-status {
+    margin: 0 0 0.75rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  #data-loaded-view { display: none; }
+  .data-panel.is-loaded #data-picker { display: none; }
+  .data-panel.is-loaded #data-loaded-view { display: block; }
+  #data-clear {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .nav-bar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 0.85rem 1.25rem;
+    margin-bottom: 1rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+    transition: transform 0.25s ease;
+  }
+  .nav-bar.nav-hidden {
+    transform: translateY(-130%);
+  }
+  .nav-bar select {
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--ink);
+    font: inherit;
+  }
+  .nav-spacer { flex: 1; }
+  .nav-btn {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .nav-btn:disabled { opacity: 0.4; cursor: default; }
+  #clear-highlights {
+    padding: 0.4rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #bible-text {
+    font-family: "Lora", Georgia, "Times New Roman", serif;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: var(--ink);
+    user-select: text;
+  }
+  .book-heading {
+    font-family: "Figtree", sans-serif;
+    font-weight: 800;
+    font-size: 1.6rem;
+    margin: 2.5rem 0 1rem;
+    scroll-margin-top: 5.5rem;
+  }
+  .book-heading:first-child { margin-top: 0; }
+  .chapter-section {
+    /* Skip layout/paint work for off-screen chapters - this is a ~1.6M px document with
+       1,200 sections, and without this, fast scrolling causes rendering to fall behind
+       (visible as white flashes) since the browser tries to keep it all painted at once. */
+    content-visibility: auto;
+    contain-intrinsic-size: 0 900px;
+  }
+  .chapter-heading {
+    font-family: "Figtree", sans-serif;
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: var(--muted);
+    margin: 1.5rem 0 0.5rem;
+    scroll-margin-top: 5.5rem;
+  }
+  .verse-num {
+    font-size: 0.7em;
+    font-weight: 700;
+    color: var(--ink);
+    opacity: 0.7;
+    vertical-align: super;
+    margin-right: 0.15em;
+  }
+  mark.highlight {
+    background: var(--highlight);
+    color: inherit;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  #highlighter-toggle[aria-pressed="false"] {
+    background: transparent;
+    color: var(--muted);
+  }
+  #bible-empty {
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .comment-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 1.5rem;
+  }
+  .comment-box {
+    background: var(--panel);
+    border-radius: 14px;
+    padding: 1.25rem;
+    width: 100%;
+    max-width: 24rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  }
+  .comment-box label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    font-family: "Figtree", sans-serif;
+  }
+  #comment-input {
+    width: 100%;
+    padding: 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+    font: inherit;
+    resize: vertical;
+  }
+  .comment-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    align-items: center;
+  }
+  .comment-actions button {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--ink);
+    font-family: "Figtree", sans-serif;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #comment-save {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  #comment-remove {
+    background: transparent;
+    color: var(--muted);
+    border-color: transparent;
+  }
+  #comments-rail {
+    position: fixed;
+    top: 0;
+    display: none;
+    z-index: 4;
+  }
+  .comment-card {
+    position: absolute;
+    left: 0;
+    right: 0;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 0.55rem 0.7rem;
+    font-family: "Figtree", sans-serif;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: var(--ink);
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+</style>
+</head>
+<body>
+<div id="comments-rail"></div>
+<main>
+  <h1>Read the Bible</h1>
+  <div class="mode-tabs">
+    <a href="index.html" class="mode-tab">Search</a>
+    <a href="read.html" class="mode-tab active">Read</a>
+  </div>
+
+  <div id="data-box" class="panel data-panel">
+    <p id="data-status">Select your NIV data file (niv.json) to start reading. It's remembered in this browser afterward - never uploaded anywhere.</p>
+    <div id="data-picker">
+      <input id="data-file" type="file" accept="application/json,.json">
+    </div>
+    <div id="data-loaded-view">
+      <button id="data-clear" type="button">Forget stored data</button>
+    </div>
+  </div>
+
+  <div id="reader" class="panel" style="display:none;">
+    <div class="nav-bar">
+      <select id="book-select"></select>
+      <select id="chapter-select"></select>
+      <button id="prev-chapter" class="nav-btn" type="button">&larr;</button>
+      <button id="next-chapter" class="nav-btn" type="button">&rarr;</button>
+      <span class="nav-spacer"></span>
+      <button id="highlighter-toggle" class="nav-btn" type="button" title="Toggle highlighter (H)">Highlighter: On</button>
+      <button id="clear-highlights" type="button">Clear highlights here</button>
+    </div>
+    <div id="bible-text"></div>
+  </div>
+  <p id="bible-empty" style="display:none;">Load your NIV data file above to start reading.</p>
+
+  <div id="comment-overlay" class="comment-overlay" style="display:none;">
+    <div class="comment-box">
+      <label for="comment-input">Comment on this highlight</label>
+      <textarea id="comment-input" rows="4"></textarea>
+      <div class="comment-actions">
+        <button id="comment-remove" type="button">Remove comment</button>
+        <span class="nav-spacer"></span>
+        <button id="comment-cancel" type="button">Cancel</button>
+        <button id="comment-save" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+</main>
+<script>
+  var DB_NAME = "bible-search-cache";
+  var STORE_NAME = "kv";
+  var DATA_KEY = "niv.json";
+  var HIGHLIGHT_PREFIX = "highlights:";
+
+  var BOOKS_IN_ORDER = [
+    "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth",
+    "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles",
+    "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon",
+    "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah",
+    "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi",
+    "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians",
+    "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians",
+    "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews", "James", "1 Peter", "2 Peter",
+    "1 John", "2 John", "3 John", "Jude", "Revelation"
+  ];
+
+  var nivData = null;
+  var ALL_CHAPTERS = []; // flat [{book, chapter}] in reading order, built once data loads
+  var currentIndex = -1; // index into ALL_CHAPTERS of whatever is nearest top of viewport
+  var sectionObserver = null;
+  var suppressObserver = false;
+
+  var dataBox = document.getElementById("data-box");
+  var dataStatus = document.getElementById("data-status");
+  var dataFile = document.getElementById("data-file");
+  var dataClear = document.getElementById("data-clear");
+  var reader = document.getElementById("reader");
+  var bookSelect = document.getElementById("book-select");
+  var chapterSelect = document.getElementById("chapter-select");
+  var prevBtn = document.getElementById("prev-chapter");
+  var nextBtn = document.getElementById("next-chapter");
+  var textEl = document.getElementById("bible-text");
+  var emptyEl = document.getElementById("bible-empty");
+  var clearHighlightsBtn = document.getElementById("clear-highlights");
+  var highlighterToggle = document.getElementById("highlighter-toggle");
+  var highlighterMode = true;
+
+  function updateHighlighterToggle() {
+    highlighterToggle.textContent = "Highlighter: " + (highlighterMode ? "On" : "Off");
+    highlighterToggle.setAttribute("aria-pressed", String(highlighterMode));
+  }
+
+  function toggleHighlighterMode() {
+    highlighterMode = !highlighterMode;
+    updateHighlighterToggle();
+  }
+
+  highlighterToggle.addEventListener("click", toggleHighlighterMode);
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "h" && e.key !== "H") return;
+    var tag = (document.activeElement && document.activeElement.tagName) || "";
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+    toggleHighlighterMode();
+  });
+
+  updateHighlighterToggle();
+
+  var commentOverlay = document.getElementById("comment-overlay");
+  var commentInput = document.getElementById("comment-input");
+  var commentSaveBtn = document.getElementById("comment-save");
+  var commentCancelBtn = document.getElementById("comment-cancel");
+  var commentRemoveBtn = document.getElementById("comment-remove");
+  var activeCommentMark = null;
+
+  function openCommentEditor(mark) {
+    activeCommentMark = mark;
+    commentInput.value = mark.getAttribute("data-comment") || "";
+    commentOverlay.style.display = "flex";
+    commentInput.focus();
+  }
+
+  function closeCommentEditor() {
+    commentOverlay.style.display = "none";
+    activeCommentMark = null;
+  }
+
+  function applyComment(text) {
+    if (!activeCommentMark) return;
+    var mark = activeCommentMark;
+    var section = mark.closest(".chapter-section");
+    if (text && text.trim()) {
+      mark.setAttribute("data-comment", text);
+      mark.title = text;
+      mark.classList.add("commented");
+    } else {
+      mark.removeAttribute("data-comment");
+      mark.removeAttribute("title");
+      mark.classList.remove("commented");
+    }
+    if (section) saveHighlightState(section);
+    layoutCommentsRail();
+  }
+
+  // Shows existing comments as floating cards in the margin, positioned level with their
+  // highlight - only for highlights currently near the viewport, and only when there's
+  // enough side margin to fit them (narrower screens fall back to the title/click editor).
+  var commentsRail = document.getElementById("comments-rail");
+  var mainEl = document.querySelector("main");
+
+  function layoutCommentsRail() {
+    var mainRect = mainEl.getBoundingClientRect();
+    var available = window.innerWidth - mainRect.right;
+    if (available < 220) {
+      commentsRail.style.display = "none";
+      return;
+    }
+    var width = Math.min(260, available - 24);
+    commentsRail.style.display = "block";
+    commentsRail.style.left = (mainRect.right + 24) + "px";
+    commentsRail.style.width = width + "px";
+
+    var marks = textEl.querySelectorAll("mark.highlight.commented");
+    var cards = [];
+    marks.forEach(function (mark) {
+      var r = mark.getBoundingClientRect();
+      if (r.bottom < -200 || r.top > window.innerHeight + 200) return;
+      cards.push({ mark: mark, top: r.top });
+    });
+
+    commentsRail.innerHTML = "";
+    cards.forEach(function (c) {
+      var card = document.createElement("div");
+      card.className = "comment-card";
+      card.style.top = c.top + "px";
+      card.textContent = c.mark.getAttribute("data-comment") || "";
+      card.addEventListener("click", function () { openCommentEditor(c.mark); });
+      commentsRail.appendChild(card);
+    });
+  }
+
+  var railUpdateScheduled = false;
+  function scheduleRailUpdate() {
+    if (railUpdateScheduled) return;
+    railUpdateScheduled = true;
+    requestAnimationFrame(function () {
+      railUpdateScheduled = false;
+      layoutCommentsRail();
+    });
+  }
+  window.addEventListener("scroll", scheduleRailUpdate, { passive: true });
+
+  // Slide the nav bar out of the way while scrolling down (more room to read), and
+  // bring it back as soon as the user scrolls up even slightly.
+  var navBarEl = document.querySelector(".nav-bar");
+  var lastScrollY = window.scrollY;
+  var navScrollScheduled = false;
+  function updateNavBarVisibility() {
+    var y = window.scrollY;
+    if (y > lastScrollY && y > navBarEl.offsetHeight) {
+      navBarEl.classList.add("nav-hidden");
+    } else if (y < lastScrollY) {
+      navBarEl.classList.remove("nav-hidden");
+    }
+    lastScrollY = y;
+  }
+  window.addEventListener("scroll", function () {
+    if (navScrollScheduled) return;
+    navScrollScheduled = true;
+    requestAnimationFrame(function () {
+      navScrollScheduled = false;
+      updateNavBarVisibility();
+    });
+  }, { passive: true });
+  window.addEventListener("resize", scheduleRailUpdate);
+
+  commentSaveBtn.addEventListener("click", function () {
+    applyComment(commentInput.value);
+    closeCommentEditor();
+  });
+  commentRemoveBtn.addEventListener("click", function () {
+    applyComment("");
+    closeCommentEditor();
+  });
+  commentCancelBtn.addEventListener("click", closeCommentEditor);
+  commentOverlay.addEventListener("click", function (e) {
+    if (e.target === commentOverlay) closeCommentEditor();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && commentOverlay.style.display !== "none") closeCommentEditor();
+  });
+
+  function openDb() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore(STORE_NAME); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+  function idbGet(key) {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(STORE_NAME, "readonly");
+        var req = tx.objectStore(STORE_NAME).get(key);
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+  function idbSet(key, value) {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(STORE_NAME, "readwrite");
+        tx.objectStore(STORE_NAME).put(value, key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+  function idbDelete(key) {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(STORE_NAME, "readwrite");
+        tx.objectStore(STORE_NAME).delete(key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  function highlightKey(book, chapter) {
+    return HIGHLIGHT_PREFIX + book + ":" + chapter;
+  }
+
+  function chapterNumbers(book) {
+    var chapters = nivData[book];
+    if (!chapters) return [];
+    return Object.keys(chapters).map(function (c) { return parseInt(c, 10); })
+      .sort(function (a, b) { return a - b; });
+  }
+
+  function sectionId(book, chapter) {
+    return "ch-" + book.replace(/\s+/g, "_") + "-" + chapter;
+  }
+
+  function renderWholeBible() {
+    ALL_CHAPTERS = [];
+    var html = "";
+    BOOKS_IN_ORDER.forEach(function (book) {
+      if (!nivData[book]) return;
+      html += '<h2 class="book-heading">' + book + '</h2>';
+      chapterNumbers(book).forEach(function (chapter) {
+        ALL_CHAPTERS.push({ book: book, chapter: chapter });
+        var key = highlightKey(book, chapter);
+        var saved = localStorage.getItem(key);
+        html += '<section class="chapter-section" id="' + sectionId(book, chapter) + '" data-book="' + book + '" data-chapter="' + chapter + '">';
+        html += '<h3 class="chapter-heading">' + book + ' ' + chapter + '</h3>';
+        html += '<div class="verse-flow">';
+        if (saved) {
+          html += saved;
+        } else {
+          var verses = nivData[book][chapter];
+          var verseNums = Object.keys(verses).map(function (v) { return parseInt(v, 10); })
+            .sort(function (a, b) { return a - b; });
+          verseNums.forEach(function (v) {
+            html += '<sup class="verse-num">' + v + '</sup>' + verses[String(v)] + " ";
+          });
+        }
+        html += '</div></section>';
+      });
+    });
+    textEl.innerHTML = html;
+    setupObserver();
+  }
+
+  function setupObserver() {
+    if (sectionObserver) sectionObserver.disconnect();
+    sectionObserver = new IntersectionObserver(function (entries) {
+      if (suppressObserver) return;
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        var book = entry.target.getAttribute("data-book");
+        var chapter = parseInt(entry.target.getAttribute("data-chapter"), 10);
+        setCurrent(book, chapter, false);
+      });
+    }, { rootMargin: "-10% 0px -80% 0px" });
+    document.querySelectorAll(".chapter-section").forEach(function (el) { sectionObserver.observe(el); });
+  }
+
+  function populateBooks() {
+    bookSelect.innerHTML = "";
+    BOOKS_IN_ORDER.forEach(function (book) {
+      if (!nivData[book]) return;
+      var opt = document.createElement("option");
+      opt.value = book;
+      opt.textContent = book;
+      bookSelect.appendChild(opt);
+    });
+  }
+
+  function populateChapterOptions(book) {
+    var chapters = chapterNumbers(book);
+    chapterSelect.innerHTML = "";
+    chapters.forEach(function (c) {
+      var opt = document.createElement("option");
+      opt.value = String(c);
+      opt.textContent = "Chapter " + c;
+      chapterSelect.appendChild(opt);
+    });
+  }
+
+  function setCurrent(book, chapter, scrollTo) {
+    var idx = ALL_CHAPTERS.findIndex(function (c) { return c.book === book && c.chapter === chapter; });
+    if (idx === -1) return;
+    currentIndex = idx;
+
+    if (bookSelect.value !== book) {
+      bookSelect.value = book;
+      populateChapterOptions(book);
+    }
+    chapterSelect.value = String(chapter);
+
+    prevBtn.disabled = idx <= 0;
+    nextBtn.disabled = idx >= ALL_CHAPTERS.length - 1;
+
+    localStorage.setItem("read:lastBook", book);
+    localStorage.setItem("read:lastChapter:" + book, String(chapter));
+
+    if (scrollTo) {
+      // The whole Bible is one very tall document (~1.6M px) - a "smooth" scroll across
+      // large jumps can take many seconds, which raced against the observer suppression
+      // window below. An instant jump avoids that entirely and is more practical here.
+      suppressObserver = true;
+      document.getElementById(sectionId(book, chapter)).scrollIntoView({ behavior: "auto", block: "start" });
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          suppressObserver = false;
+          layoutCommentsRail();
+        });
+      });
+    }
+  }
+
+  function goTo(book, chapter) { setCurrent(book, chapter, true); }
+
+  function saveHighlightState(sectionEl) {
+    var book = sectionEl.getAttribute("data-book");
+    var chapter = sectionEl.getAttribute("data-chapter");
+    var flow = sectionEl.querySelector(".verse-flow");
+    localStorage.setItem(highlightKey(book, chapter), flow.innerHTML);
+  }
+
+  function wrapRangeInMark(range) {
+    var mark = document.createElement("mark");
+    mark.className = "highlight";
+    try {
+      range.surroundContents(mark);
+    } catch (e) {
+      var contents = range.extractContents();
+      mark.appendChild(contents);
+      range.insertNode(mark);
+    }
+  }
+
+  textEl.addEventListener("mouseup", function () {
+    if (!highlighterMode) return;
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    var range = sel.getRangeAt(0);
+    var section = range.commonAncestorContainer;
+    section = section.nodeType === 1 ? section.closest(".chapter-section") : section.parentElement.closest(".chapter-section");
+    if (!section) return;
+    wrapRangeInMark(range);
+    sel.removeAllRanges();
+    saveHighlightState(section);
+  });
+
+  textEl.addEventListener("click", function (e) {
+    var mark = e.target.closest ? e.target.closest("mark.highlight") : null;
+    if (!mark) return;
+    var section = mark.closest(".chapter-section");
+
+    if (highlighterMode) {
+      var parent = mark.parentNode;
+      while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+      parent.removeChild(mark);
+      parent.normalize();
+    } else {
+      openCommentEditor(mark);
+      return;
+    }
+    if (section) saveHighlightState(section);
+  });
+
+  clearHighlightsBtn.addEventListener("click", function () {
+    if (currentIndex === -1) return;
+    var cur = ALL_CHAPTERS[currentIndex];
+    localStorage.removeItem(highlightKey(cur.book, cur.chapter));
+    renderWholeBible();
+    setCurrent(cur.book, cur.chapter, true);
+  });
+
+  bookSelect.addEventListener("change", function () {
+    populateChapterOptions(bookSelect.value);
+    var chapters = chapterNumbers(bookSelect.value);
+    goTo(bookSelect.value, chapters[0]);
+  });
+  chapterSelect.addEventListener("change", function () {
+    goTo(bookSelect.value, parseInt(chapterSelect.value, 10));
+  });
+
+  prevBtn.addEventListener("click", function () {
+    if (currentIndex > 0) {
+      var c = ALL_CHAPTERS[currentIndex - 1];
+      goTo(c.book, c.chapter);
+    }
+  });
+  nextBtn.addEventListener("click", function () {
+    if (currentIndex !== -1 && currentIndex < ALL_CHAPTERS.length - 1) {
+      var c = ALL_CHAPTERS[currentIndex + 1];
+      goTo(c.book, c.chapter);
+    }
+  });
+
+  function refreshDataUI(loaded) {
+    if (loaded) {
+      dataBox.classList.add("is-loaded");
+      dataStatus.textContent = "Loaded from storage.";
+    } else {
+      dataBox.classList.remove("is-loaded");
+      dataStatus.textContent = "Select your NIV data file (niv.json) to start reading. It's remembered in this browser afterward - never uploaded anywhere.";
+      nivData = null;
+    }
+    emptyEl.style.display = loaded ? "none" : "block";
+    reader.style.display = loaded ? "block" : "none";
+    if (!loaded) return;
+
+    populateBooks();
+    renderWholeBible();
+
+    var lastBook = localStorage.getItem("read:lastBook");
+    var lastChapter = localStorage.getItem("read:lastChapter:" + lastBook);
+    var startBook = (lastBook && nivData[lastBook]) ? lastBook : BOOKS_IN_ORDER[0];
+    var chapters = chapterNumbers(startBook);
+    var startChapter = (lastChapter && chapters.indexOf(parseInt(lastChapter, 10)) !== -1)
+      ? parseInt(lastChapter, 10) : chapters[0];
+
+    populateChapterOptions(startBook);
+    // Delay the initial jump a couple of frames so it doesn't race the IntersectionObserver's
+    // own initial "burst" callback for the ~1200 sections it just started observing.
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        setCurrent(startBook, startChapter, true);
+      });
+    });
+  }
+
+  dataFile.addEventListener("change", function () {
+    var file = dataFile.files && dataFile.files[0];
+    if (!file) return;
+    dataStatus.textContent = "Loading…";
+    var reader2 = new FileReader();
+    reader2.onload = function () {
+      try {
+        nivData = JSON.parse(reader2.result);
+      } catch (e) {
+        dataStatus.textContent = "That file didn't look like valid JSON - try again.";
+        return;
+      }
+      idbSet(DATA_KEY, reader2.result).then(function () { refreshDataUI(true); });
+    };
+    reader2.onerror = function () {
+      dataStatus.textContent = "Couldn't read that file - try again.";
+    };
+    reader2.readAsText(file);
+  });
+
+  dataClear.addEventListener("click", function () {
+    idbDelete(DATA_KEY).then(function () {
+      dataFile.value = "";
+      refreshDataUI(false);
+    });
+  });
+
+  idbGet(DATA_KEY).then(function (text) {
+    if (!text) { refreshDataUI(false); return; }
+    try {
+      nivData = JSON.parse(text);
+      refreshDataUI(true);
+    } catch (e) {
+      refreshDataUI(false);
+    }
+  }).catch(function () { refreshDataUI(false); });
+</script>
+</body>
+</html>

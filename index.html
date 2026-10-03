@@ -53,13 +53,13 @@
   .gsc-control-cse, .gsc-control-cse table, .gsc-input-box, .gsc-search-box {
     max-width: 100% !important;
   }
-  /* Google renders its own result list below the box; we replace it with #results-list.
-     Only hidden once we've actually confirmed real results came back (see .results-ready
-     below) - Google renders CAPTCHA/"unusual traffic" challenges in this same container,
-     and hiding it unconditionally would silently block the page with no way to resolve it. */
-  body.results-ready .gsc-results-wrapper-nooverlay,
-  body.results-ready .gsc-results-wrapper-overlay,
-  body.results-ready .gsc-modal-background-image {
+  /* Google renders its own result list below the box; we replace it with #results-list,
+     so it's hidden by default. If a search hangs (e.g. Google serves a CAPTCHA/"unusual
+     traffic" challenge in this same container instead of firing "ready"), .results-stuck
+     is added after a timeout so the native UI becomes visible and solvable. */
+  body:not(.results-stuck) .gsc-results-wrapper-nooverlay,
+  body:not(.results-stuck) .gsc-results-wrapper-overlay,
+  body:not(.results-stuck) .gsc-modal-background-image {
     display: none !important;
   }
   /* Google locks background scroll behind its (hidden) overlay via this class and never
@@ -147,11 +147,74 @@
     font-weight: 400;
     color: var(--muted);
   }
+  .mode-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+  }
+  .mode-tab {
+    padding: 0.5rem 1rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    color: var(--ink);
+  }
+  .mode-tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .data-panel {
+    margin-bottom: 1rem;
+  }
+  .data-panel #data-status {
+    margin: 0 0 0.75rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  #data-loaded-view {
+    display: none;
+  }
+  .data-panel.is-loaded #data-picker {
+    display: none;
+  }
+  .data-panel.is-loaded #data-loaded-view {
+    display: block;
+  }
+  #data-file {
+    color: var(--ink);
+    font: inherit;
+  }
+  #data-clear {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
 <main>
-  <h1>Search this site</h1>
+  <h1>Search the bible</h1>
+  <div class="mode-tabs">
+    <a href="index.html" class="mode-tab active">Search</a>
+    <a href="read.html" class="mode-tab">Read</a>
+  </div>
+  <div id="data-box" class="panel data-panel">
+    <p id="data-status">Select your NIV data file (niv.json) to enable verse lookups. It's remembered in this browser afterward - never uploaded anywhere.</p>
+    <div id="data-picker">
+      <input id="data-file" type="file" accept="application/json,.json">
+    </div>
+    <div id="data-loaded-view">
+      <button id="data-clear" type="button">Forget stored data</button>
+    </div>
+  </div>
   <div class="panel">
     <div class="gcse-search"></div>
     <p id="results-status"></p>
@@ -160,6 +223,7 @@
 </main>
 <script>
   var resultsRenderedForQuery = false;
+  var stuckTimer = null;
 
   // Bible books containing links are ranked first in the results list below.
   var BIBLE_BOOKS = [
@@ -183,12 +247,108 @@
     return BOOK_PATTERN.test(text || "");
   }
 
-  // Local NIV text (private, gitignored - see data/niv.json) keyed as book -> chapter -> verse -> text.
+  // NIV text is supplied by the user as a local file and cached in this browser's
+  // IndexedDB - it's never uploaded or fetched from any server. Keyed as
+  // book -> chapter -> verse -> text, same shape the rest of this file expects.
+  var DB_NAME = "bible-search-cache";
+  var STORE_NAME = "kv";
+  var DATA_KEY = "niv.json";
+
   var nivData = null;
-  fetch("data/niv.json")
-    .then(function (res) { return res.ok ? res.json() : null; })
-    .then(function (json) { nivData = json; })
-    .catch(function () { nivData = null; });
+  var dataBox = document.getElementById("data-box");
+  var dataStatus = document.getElementById("data-status");
+  var dataFile = document.getElementById("data-file");
+  var dataClear = document.getElementById("data-clear");
+
+  function openDb() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore(STORE_NAME); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  function idbGet(key) {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(STORE_NAME, "readonly");
+        var req = tx.objectStore(STORE_NAME).get(key);
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  function idbSet(key, value) {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(STORE_NAME, "readwrite");
+        tx.objectStore(STORE_NAME).put(value, key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  function idbDelete(key) {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(STORE_NAME, "readwrite");
+        tx.objectStore(STORE_NAME).delete(key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  function refreshDataUI(loaded) {
+    if (loaded) {
+      dataBox.classList.add("is-loaded");
+      dataStatus.textContent = "Loaded from storage.";
+    } else {
+      dataBox.classList.remove("is-loaded");
+      dataStatus.textContent = "Select your NIV data file (niv.json) to enable verse lookups. It's remembered in this browser afterward - never uploaded anywhere.";
+      nivData = null;
+    }
+  }
+
+  dataFile.addEventListener("change", function () {
+    var file = dataFile.files && dataFile.files[0];
+    if (!file) return;
+    dataStatus.textContent = "Loading…";
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        nivData = JSON.parse(reader.result);
+      } catch (e) {
+        dataStatus.textContent = "That file didn't look like valid JSON - try again.";
+        return;
+      }
+      idbSet(DATA_KEY, reader.result).then(function () { refreshDataUI(true); });
+    };
+    reader.onerror = function () {
+      dataStatus.textContent = "Couldn't read that file - try again.";
+    };
+    reader.readAsText(file);
+  });
+
+  dataClear.addEventListener("click", function () {
+    idbDelete(DATA_KEY).then(function () {
+      dataFile.value = "";
+      refreshDataUI(false);
+    });
+  });
+
+  idbGet(DATA_KEY).then(function (text) {
+    if (!text) { refreshDataUI(false); return; }
+    try {
+      nivData = JSON.parse(text);
+      refreshDataUI(true);
+    } catch (e) {
+      refreshDataUI(false);
+    }
+  }).catch(function () { refreshDataUI(false); });
 
   var BOOK_ALIASES = {
     "genesis": "Genesis", "exodus": "Exodus", "leviticus": "Leviticus", "numbers": "Numbers",
@@ -478,9 +638,14 @@
       web: {
         starting: function () {
           resultsRenderedForQuery = false;
-          // Leave Google's native UI visible until we confirm real results arrive, in
-          // case it needs to show a CAPTCHA/"unusual traffic" challenge instead.
-          document.body.classList.remove("results-ready");
+          document.body.classList.remove("results-stuck");
+          clearTimeout(stuckTimer);
+          // If "ready" hasn't fired after a few seconds, Google may be showing a
+          // CAPTCHA/"unusual traffic" challenge in its (normally hidden) native UI
+          // instead - reveal it so that's visible and solvable rather than hidden forever.
+          stuckTimer = setTimeout(function () {
+            document.body.classList.add("results-stuck");
+          }, 4000);
           document.getElementById("results-status").textContent = "Searching…";
           document.getElementById("results-list").innerHTML = "";
         },
@@ -490,7 +655,8 @@
           // firing collapses expanded verses and resets scroll position, so only the
           // first firing per query kicks off rendering.
           if (resultsRenderedForQuery) return;
-          document.body.classList.add("results-ready");
+          clearTimeout(stuckTimer);
+          document.body.classList.remove("results-stuck");
           resultsRenderedForQuery = true;
 
           var page1Items = (results || []).map(normalizeGoogleResult);
