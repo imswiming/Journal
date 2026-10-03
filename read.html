@@ -252,14 +252,15 @@
     flex-wrap: wrap;
   }
   .selection-menu button {
-    padding: 0.5rem 0.9rem;
+    padding: 0.55rem 0.8rem;
     border: none;
     border-radius: 6px;
     background: var(--accent);
     color: #fff;
     font-family: "Figtree", sans-serif;
     font-weight: 600;
-    font-size: 0.85rem;
+    font-size: 1.15rem;
+    line-height: 1;
     cursor: pointer;
     white-space: nowrap;
   }
@@ -413,10 +414,10 @@
     <div id="bible-text"></div>
   </div>
   <div id="selection-menu" class="selection-menu" style="display:none;">
-    <button id="selection-highlight-btn" type="button">Highlight</button>
-    <button id="selection-highlight-verse-btn" type="button">Highlight verse</button>
-    <button id="view-biblehub" type="button">View on BibleHub</button>
-    <button id="view-xrefs" type="button">Cross References</button>
+    <button id="selection-highlight-btn" type="button" title="Highlight" aria-label="Highlight">&#128397;&#65039;</button>
+    <button id="selection-highlight-verse-btn" type="button" title="Highlight verse" aria-label="Highlight verse">&#128397;&#65039;</button>
+    <button id="view-biblehub" type="button" title="View on BibleHub" aria-label="View on BibleHub">&#128279;</button>
+    <button id="view-xrefs" type="button" title="Cross References" aria-label="Cross References">&#128256;</button>
   </div>
   <p id="bible-empty" style="display:none;">Load your NIV data file above to start reading.</p>
 
