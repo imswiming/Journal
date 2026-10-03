@@ -73,7 +73,9 @@
     padding: 0.75rem 1rem;
     background: var(--bg);
     border-bottom: 1px solid var(--line);
+    transition: transform 0.25s ease;
   }
+  .column-tabs.tabs-hidden { transform: translateY(-130%); }
   .column-tab {
     flex: 1;
     text-align: center;
@@ -95,6 +97,7 @@
   .columns-wrap {
     display: flex;
     height: calc(100vh - 56px);
+    height: calc(100dvh - 56px);
     overflow-x: auto;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
@@ -835,6 +838,38 @@
   // ============================================================
   var columnsWrap = document.getElementById("columns-wrap");
   var columnTabs = document.querySelectorAll(".column-tab");
+  var columnTabsEl = document.querySelector(".column-tabs");
+
+  // Slide the top tab bar out of the way while scrolling down on mobile (more
+  // room to read, and lets the browser's own address bar collapse too, since
+  // that only happens in response to the page's own scroll). Scroll events on
+  // the individual columns don't bubble, so this listens during the capture
+  // phase to catch them regardless of which column is scrolling.
+  var tabsLastScrollY = 0;
+  var tabsScrollScheduled = false;
+  function updateColumnTabsVisibility(scrollTop) {
+    if (isDesktopColumns()) {
+      columnTabsEl.classList.remove("tabs-hidden");
+      tabsLastScrollY = scrollTop;
+      return;
+    }
+    if (scrollTop > tabsLastScrollY && scrollTop > columnTabsEl.offsetHeight) {
+      columnTabsEl.classList.add("tabs-hidden");
+    } else if (scrollTop < tabsLastScrollY) {
+      columnTabsEl.classList.remove("tabs-hidden");
+    }
+    tabsLastScrollY = scrollTop;
+  }
+  document.addEventListener("scroll", function (e) {
+    var target = e.target;
+    if (!target || !target.classList || !target.classList.contains("column")) return;
+    if (tabsScrollScheduled) return;
+    tabsScrollScheduled = true;
+    requestAnimationFrame(function () {
+      tabsScrollScheduled = false;
+      updateColumnTabsVisibility(target.scrollTop);
+    });
+  }, { capture: true, passive: true });
 
   function scrollToColumn(id) {
     var col = document.getElementById(id);
@@ -846,15 +881,22 @@
     tab.addEventListener("click", function () { scrollToColumn(tab.getAttribute("data-target")); });
   });
 
-  function updateActiveColumnTab() {
+  var COLUMN_IDS = ["col-search", "col-read", "col-comments"];
+
+  function currentColumnIndex() {
     var mid = columnsWrap.scrollLeft + columnsWrap.clientWidth / 2;
-    var best = null, bestDist = Infinity;
-    ["col-search", "col-read", "col-comments"].forEach(function (id) {
+    var best = 0, bestDist = Infinity;
+    COLUMN_IDS.forEach(function (id, i) {
       var col = document.getElementById(id);
       var center = col.offsetLeft + col.clientWidth / 2;
       var dist = Math.abs(center - mid);
-      if (dist < bestDist) { bestDist = dist; best = id; }
+      if (dist < bestDist) { bestDist = dist; best = i; }
     });
+    return best;
+  }
+
+  function updateActiveColumnTab() {
+    var best = COLUMN_IDS[currentColumnIndex()];
     columnTabs.forEach(function (tab) {
       tab.classList.toggle("active", tab.getAttribute("data-target") === best);
     });
@@ -869,6 +911,26 @@
     });
   }, { passive: true });
   updateActiveColumnTab();
+
+  // A fast fling can carry native scroll-snap momentum past the next column
+  // straight to the one after it - cap any single swipe/drag to moving at
+  // most one column from wherever it started.
+  var swipeStartColIndex = null;
+  columnsWrap.addEventListener("touchstart", function () {
+    swipeStartColIndex = currentColumnIndex();
+  }, { passive: true });
+  var scrollSettleTimer = null;
+  columnsWrap.addEventListener("scroll", function () {
+    clearTimeout(scrollSettleTimer);
+    scrollSettleTimer = setTimeout(function () {
+      if (swipeStartColIndex === null) return;
+      var startIdx = swipeStartColIndex;
+      swipeStartColIndex = null;
+      var finalIdx = currentColumnIndex();
+      var clamped = Math.max(startIdx - 1, Math.min(startIdx + 1, finalIdx));
+      if (clamped !== finalIdx) scrollToColumn(COLUMN_IDS[clamped]);
+    }, 120);
+  }, { passive: true });
 
   function goToVerseInRead(book, chapter, verse) {
     scrollToColumn("col-read");
