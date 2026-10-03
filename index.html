@@ -120,8 +120,32 @@
   }
   #col-comments .column-pad { max-width: 28rem; }
 
+  /* Comments isn't part of the mobile pager - its column and tab only exist
+     on the wide desktop layout below. See layoutMobileCommentBadges for the
+     mobile replacement. */
+  #col-comments, .column-tab[data-target="col-comments"] { display: none; }
+  .mobile-comment-badge {
+    position: fixed;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.95rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    z-index: 6;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  }
+
   @media (min-width: 1100px) {
     .column-tabs { display: none; }
+    .mobile-comment-badge { display: none; }
     .columns-wrap {
       height: 100vh;
       overflow-x: visible;
@@ -138,7 +162,7 @@
     /* Cards are positioned to line up with their highlight's on-screen position
        in Read, which only makes sense if this column isn't also scrolling on
        its own. */
-    #col-comments { flex: 1 1 0; min-width: 18rem; overflow-y: hidden; }
+    #col-comments { flex: 1 1 0; min-width: 18rem; overflow-y: hidden; display: block; }
   }
 
   /* ---------- Search column ---------- */
@@ -881,9 +905,14 @@
     tab.addEventListener("click", function () { scrollToColumn(tab.getAttribute("data-target")); });
   });
 
-  var COLUMN_IDS = ["col-search", "col-read", "col-comments"];
+  // Comments isn't part of the mobile pager at all - there's a floating badge
+  // on the highlight itself there instead (see layoutMobileCommentBadges).
+  function getColumnIds() {
+    return isDesktopColumns() ? ["col-search", "col-read", "col-comments"] : ["col-search", "col-read"];
+  }
 
   function currentColumnIndex() {
+    var COLUMN_IDS = getColumnIds();
     var mid = columnsWrap.scrollLeft + columnsWrap.clientWidth / 2;
     var best = 0, bestDist = Infinity;
     COLUMN_IDS.forEach(function (id, i) {
@@ -896,7 +925,7 @@
   }
 
   function updateActiveColumnTab() {
-    var best = COLUMN_IDS[currentColumnIndex()];
+    var best = getColumnIds()[currentColumnIndex()];
     columnTabs.forEach(function (tab) {
       tab.classList.toggle("active", tab.getAttribute("data-target") === best);
     });
@@ -928,7 +957,7 @@
       swipeStartColIndex = null;
       var finalIdx = currentColumnIndex();
       var clamped = Math.max(startIdx - 1, Math.min(startIdx + 1, finalIdx));
-      if (clamped !== finalIdx) scrollToColumn(COLUMN_IDS[clamped]);
+      if (clamped !== finalIdx) scrollToColumn(getColumnIds()[clamped]);
     }, 120);
   }, { passive: true });
 
@@ -2006,55 +2035,46 @@
     });
   }
 
-  function layoutCommentsList() {
-    if (!nivData) return;
-    var cards = [];
-    BOOKS_IN_ORDER.forEach(function (book) {
-      if (!nivData[book]) return;
-      chapterNumbers(book).forEach(function (chapter) {
-        var saved = localStorage.getItem(highlightKey(book, chapter));
-        if (!saved || saved.indexOf("commented") === -1) return;
-        var temp = document.createElement("div");
-        temp.innerHTML = saved;
-        temp.querySelectorAll("mark.highlight.commented").forEach(function (mark) {
-          cards.push({
-            book: book,
-            chapter: chapter,
-            text: mark.getAttribute("data-comment") || "",
-            highlight: mark.textContent
-          });
-        });
+  // On mobile there's no side-by-side Comments column to speak of - instead,
+  // every commented highlight currently on screen gets a small floating badge
+  // right next to it, tapping which opens the same comment editor as tapping
+  // the highlight itself.
+  function layoutMobileCommentBadges() {
+    document.querySelectorAll(".mobile-comment-badge").forEach(function (b) { b.remove(); });
+    if (isDesktopColumns() || !readerInited) return;
+    var marks = textEl.querySelectorAll("mark.highlight.commented");
+    marks.forEach(function (mark) {
+      var r = mark.getBoundingClientRect();
+      if (r.bottom < -40 || r.top > window.innerHeight + 40) return;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mobile-comment-badge";
+      btn.textContent = "\u{1F4AC}";
+      btn.title = "View/edit comment";
+      btn.style.top = Math.max(4, r.top - 6) + "px";
+      btn.style.left = Math.min(window.innerWidth - 36, r.right + 4) + "px";
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        openCommentEditor(mark);
       });
-    });
-
-    commentsEmpty.style.display = cards.length ? "none" : "block";
-    commentsList.style.position = "static";
-    commentsList.style.minHeight = "";
-    commentsList.innerHTML = "";
-    cards.forEach(function (c) {
-      var card = buildCommentCard(c.book + " " + c.chapter, c.highlight, c.text);
-      card.addEventListener("click", function () {
-        scrollToColumn("col-read");
-        navigateViaLink(c.book, c.chapter);
-      });
-      commentsList.appendChild(card);
+      document.body.appendChild(btn);
     });
   }
 
   function renderCommentsColumn() {
     if (isDesktopColumns()) layoutCommentsDesktop();
-    else layoutCommentsList();
+    else layoutMobileCommentBadges();
   }
   window.matchMedia("(min-width: 1100px)").addEventListener("change", renderCommentsColumn);
 
   var commentsLayoutScheduled = false;
   function scheduleCommentsLayout() {
-    if (!isDesktopColumns()) return;
     if (commentsLayoutScheduled) return;
     commentsLayoutScheduled = true;
     requestAnimationFrame(function () {
       commentsLayoutScheduled = false;
-      layoutCommentsDesktop();
+      if (isDesktopColumns()) layoutCommentsDesktop();
+      else layoutMobileCommentBadges();
     });
   }
 </script>
