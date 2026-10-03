@@ -119,11 +119,12 @@
     margin: 0 auto;
   }
   #col-comments .column-pad { max-width: 28rem; }
+  #col-activity .column-pad { max-width: 22rem; }
 
   /* Comments isn't part of the mobile pager - its column and tab only exist
      on the wide desktop layout below. See layoutMobileCommentBadges for the
      mobile replacement. */
-  #col-comments, .column-tab[data-target="col-comments"] { display: none; }
+  #col-comments, .column-tab[data-target="col-comments"], #col-activity { display: none; }
   .mobile-comment-badge {
     position: fixed;
     width: 30px;
@@ -163,6 +164,7 @@
        in Read, which only makes sense if this column isn't also scrolling on
        its own. */
     #col-comments { flex: 1 1 0; min-width: 18rem; overflow-y: hidden; display: block; }
+    #col-activity { flex: 1 1 0; min-width: 16rem; display: block; }
   }
 
   /* ---------- Search column ---------- */
@@ -614,6 +616,14 @@
       </div>
     </section>
 
+    <section class="column" id="col-activity">
+      <div class="column-pad">
+        <h1>Recent Activity</h1>
+        <div id="activity-list"></div>
+        <p id="activity-empty">No activity yet.</p>
+      </div>
+    </section>
+
   </div>
 </div>
 
@@ -929,6 +939,7 @@
     columnTabs.forEach(function (tab) {
       tab.classList.toggle("active", tab.getAttribute("data-target") === best);
     });
+    scheduleCommentsLayout();
   }
   var tabUpdateScheduled = false;
   columnsWrap.addEventListener("scroll", function () {
@@ -2042,6 +2053,10 @@
   function layoutMobileCommentBadges() {
     document.querySelectorAll(".mobile-comment-badge").forEach(function (b) { b.remove(); });
     if (isDesktopColumns() || !readerInited) return;
+    // Read's content sits beside the other columns, not beneath them - its
+    // highlights can still be within the vertical bounds of whichever column
+    // is actually on screen, so only bother at all while Read is the one showing.
+    if (getColumnIds()[currentColumnIndex()] !== "col-read") return;
     var marks = textEl.querySelectorAll("mark.highlight.commented");
     marks.forEach(function (mark) {
       var r = mark.getBoundingClientRect();
