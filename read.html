@@ -363,12 +363,13 @@
     position: static;
     margin-bottom: 0.75rem;
   }
+  /* top is set in JS to track the highlight it belongs to; 50% is just the
+     fallback for the instant before that first runs. */
   #comments-drawer-handle {
     display: none;
     position: fixed;
     top: 50%;
     right: 0;
-    transform: translateY(-50%);
     background: var(--accent);
     color: #fff;
     border: none;
@@ -379,6 +380,7 @@
     z-index: 46;
     cursor: pointer;
     box-shadow: -2px 0 8px rgba(0, 0, 0, 0.2);
+    transition: top 0.15s ease;
   }
   #comments-drawer-handle.visible { display: block; }
 </style>
@@ -561,7 +563,19 @@
       commentsRail.style.left = "";
       commentsRail.style.width = "";
       commentsDrawerHandle.classList.toggle("visible", cards.length > 0);
-      if (!cards.length) closeCommentsDrawer();
+      if (cards.length) {
+        // Follow the highlight it belongs to - the nearest commented one to the
+        // middle of the screen - instead of sitting at a fixed spot.
+        var mid = window.innerHeight / 2;
+        var nearest = cards.reduce(function (best, c) {
+          return Math.abs(c.top - mid) < Math.abs(best.top - mid) ? c : best;
+        });
+        var handleHeight = commentsDrawerHandle.offsetHeight || 48;
+        var top = Math.max(8, Math.min(nearest.top, window.innerHeight - handleHeight - 8));
+        commentsDrawerHandle.style.top = top + "px";
+      } else {
+        closeCommentsDrawer();
+      }
     } else {
       commentsRail.classList.remove("drawer", "open");
       commentsDrawerHandle.classList.remove("visible");
@@ -611,6 +625,31 @@
     var dx = e.changedTouches[0].clientX - railTouchStartX;
     railTouchStartX = null;
     if (dx > 40) closeCommentsDrawer();
+  });
+
+  // A swipe on the text itself (not just the handle) also opens the comments
+  // drawer - and the opposite swipe leaves Read mode for Search. A real drag
+  // to select text is excluded (that always ends with a non-collapsed selection).
+  var textSwipeStartX = null;
+  var textSwipeStartY = null;
+  textEl.addEventListener("touchstart", function (e) {
+    var t = e.touches[0];
+    textSwipeStartX = t.clientX;
+    textSwipeStartY = t.clientY;
+  }, { passive: true });
+  textEl.addEventListener("touchend", function (e) {
+    if (textSwipeStartX === null) return;
+    var t = e.changedTouches[0];
+    var dx = t.clientX - textSwipeStartX;
+    var dy = t.clientY - textSwipeStartY;
+    textSwipeStartX = null;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8) return;
+    if (!window.getSelection().isCollapsed) return;
+    if (dx < 0) {
+      if (commentsRail.classList.contains("drawer")) openCommentsDrawer();
+    } else {
+      window.location.href = "index.html";
+    }
   });
 
   var railUpdateScheduled = false;
