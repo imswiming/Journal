@@ -195,6 +195,27 @@
     margin-bottom: 0.5rem;
     font-family: "Figtree", sans-serif;
   }
+  /* The comment editor itself is a non-modal bottom panel (no backdrop) rather
+     than a centered dialog, so it can sit alongside the text instead of
+     blocking it - and matches the selection toolbar's own bottom-bar anchor. */
+  #comment-overlay.comment-panel {
+    position: fixed;
+    inset: auto 0 0 0;
+    background: var(--panel);
+    display: block;
+    align-items: unset;
+    justify-content: unset;
+    border-top: 1px solid var(--line);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.25);
+    padding: 1rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  #comment-overlay.comment-panel .comment-box {
+    max-width: none;
+    padding: 0;
+    box-shadow: none;
+  }
   #comment-input {
     width: 100%;
     padding: 0.6rem;
@@ -380,7 +401,6 @@
     z-index: 46;
     cursor: pointer;
     box-shadow: -2px 0 8px rgba(0, 0, 0, 0.2);
-    transition: top 0.15s ease;
   }
   #comments-drawer-handle.visible { display: block; }
 </style>
@@ -433,16 +453,13 @@
     </div>
   </div>
 
-  <div id="comment-overlay" class="comment-overlay" style="display:none;">
+  <div id="comment-overlay" class="comment-panel" style="display:none;">
     <div class="comment-box">
       <label for="comment-input">Comment on this highlight</label>
       <textarea id="comment-input" rows="4"></textarea>
       <div class="comment-actions">
         <button id="comment-remove" type="button">Remove comment</button>
         <button id="highlight-remove" type="button">Remove highlight</button>
-        <span class="nav-spacer"></span>
-        <button id="comment-cancel" type="button">Cancel</button>
-        <button id="comment-save" type="button">Save</button>
       </div>
     </div>
   </div>
@@ -487,8 +504,6 @@
 
   var commentOverlay = document.getElementById("comment-overlay");
   var commentInput = document.getElementById("comment-input");
-  var commentSaveBtn = document.getElementById("comment-save");
-  var commentCancelBtn = document.getElementById("comment-cancel");
   var commentRemoveBtn = document.getElementById("comment-remove");
   var highlightRemoveBtn = document.getElementById("highlight-remove");
   var activeCommentMark = null;
@@ -496,11 +511,13 @@
   function openCommentEditor(mark) {
     activeCommentMark = mark;
     commentInput.value = mark.getAttribute("data-comment") || "";
-    commentOverlay.style.display = "flex";
-    commentInput.focus();
+    commentOverlay.style.display = "block";
+    // Shown passively, not handed focus - tapping a highlight to read its note
+    // shouldn't pop the keyboard open; the user can still tap into it to edit.
   }
 
   function closeCommentEditor() {
+    applyComment(commentInput.value);
     commentOverlay.style.display = "none";
     activeCommentMark = null;
   }
@@ -716,24 +733,33 @@
     });
   }, { passive: true });
 
-  commentSaveBtn.addEventListener("click", function () {
-    applyComment(commentInput.value);
-    closeCommentEditor();
+  // No explicit Save/Cancel - the note is applied as the user types (debounced) and
+  // whenever the editor closes, so whatever was last typed is always what's kept.
+  var commentSaveScheduled = false;
+  commentInput.addEventListener("input", function () {
+    if (commentSaveScheduled) return;
+    commentSaveScheduled = true;
+    requestAnimationFrame(function () {
+      commentSaveScheduled = false;
+      applyComment(commentInput.value);
+    });
   });
   commentRemoveBtn.addEventListener("click", function () {
-    applyComment("");
+    commentInput.value = "";
     closeCommentEditor();
   });
   highlightRemoveBtn.addEventListener("click", function () {
     if (activeCommentMark) removeHighlightMark(activeCommentMark);
-    closeCommentEditor();
-  });
-  commentCancelBtn.addEventListener("click", closeCommentEditor);
-  commentOverlay.addEventListener("click", function (e) {
-    if (e.target === commentOverlay) closeCommentEditor();
+    activeCommentMark = null;
+    commentOverlay.style.display = "none";
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && commentOverlay.style.display !== "none") closeCommentEditor();
+  });
+  document.addEventListener("mousedown", function (e) {
+    if (commentOverlay.style.display === "none") return;
+    if (commentOverlay.contains(e.target)) return;
+    closeCommentEditor();
   });
 
   function openDb() {
