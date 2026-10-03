@@ -117,17 +117,6 @@
     cursor: pointer;
   }
   .nav-btn:disabled { opacity: 0.4; cursor: default; }
-  #clear-highlights {
-    padding: 0.4rem 0.7rem;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: transparent;
-    color: var(--muted);
-    font: inherit;
-    font-size: 0.8rem;
-    cursor: pointer;
-    white-space: nowrap;
-  }
   #bible-text {
     font-family: "Lora", Georgia, "Times New Roman", serif;
     font-size: 1.05rem;
@@ -351,7 +340,7 @@
 <main>
   <h1>Read the Bible</h1>
 
-  <div id="data-box" class="panel data-panel">
+  <div id="data-box" class="panel data-panel" style="display:none;">
     <div class="mode-tabs">
       <a href="index.html" class="mode-tab">Search</a>
       <a href="read.html" class="mode-tab active">Read</a>
@@ -371,7 +360,6 @@
       <button id="prev-chapter" class="nav-btn" type="button" title="Back">&larr;</button>
       <button id="next-chapter" class="nav-btn" type="button" title="Forward">&rarr;</button>
       <span class="nav-spacer"></span>
-      <button id="clear-highlights" type="button">Clear highlights here</button>
     </div>
     <div id="bible-text"></div>
   </div>
@@ -442,7 +430,6 @@
   var nextBtn = document.getElementById("next-chapter");
   var textEl = document.getElementById("bible-text");
   var emptyEl = document.getElementById("bible-empty");
-  var clearHighlightsBtn = document.getElementById("clear-highlights");
   var selectionMenu = document.getElementById("selection-menu");
   var selectionHighlightBtn = document.getElementById("selection-highlight-btn");
   var selectionHighlightVerseBtn = document.getElementById("selection-highlight-verse-btn");
@@ -736,23 +723,33 @@
 
   function goTo(book, chapter) { setCurrent(book, chapter, true); }
 
-  // Back/forward use the browser's own session history, via pushState, so they
-  // also walk back out of read mode into search results when that's where the
-  // user came from - not just between jumps made inside read mode.
   function readUrlFor(book, chapter) {
     return "read.html?book=" + encodeURIComponent(book) + "&chapter=" + chapter;
   }
 
-  function navigateViaLink(book, chapter) {
-    goTo(book, chapter);
-    history.pushState({ book: book, chapter: chapter }, "", readUrlFor(book, chapter));
+  // Back/forward walk a history of chapters reached via a clicked verse link or a
+  // book/chapter selection. This stays entirely inside Read mode - it never hands
+  // off to the browser's own history, so it can never land back on Search.
+  var navHistory = [];
+  var navHistoryIndex = -1;
+
+  function updateNavHistoryButtons() {
+    prevBtn.disabled = navHistoryIndex <= 0;
+    nextBtn.disabled = navHistoryIndex >= navHistory.length - 1;
   }
 
-  window.addEventListener("popstate", function (e) {
-    if (e.state && e.state.book && nivData && nivData[e.state.book]) {
-      setCurrent(e.state.book, e.state.chapter, true);
+  function navigateViaLink(book, chapter) {
+    var current = currentIndex !== -1 ? ALL_CHAPTERS[currentIndex] : null;
+    navHistory = navHistory.slice(0, navHistoryIndex + 1);
+    var top = navHistory[navHistory.length - 1];
+    if (current && (!top || top.book !== current.book || top.chapter !== current.chapter)) {
+      navHistory.push({ book: current.book, chapter: current.chapter });
     }
-  });
+    navHistory.push({ book: book, chapter: chapter });
+    navHistoryIndex = navHistory.length - 1;
+    goTo(book, chapter);
+    updateNavHistoryButtons();
+  }
 
   function saveHighlightState(sectionEl) {
     var book = sectionEl.getAttribute("data-book");
@@ -790,12 +787,20 @@
   }
 
   function checkSelectionForMenu(clickX, clickY) {
+    var hasCoords = typeof clickX === "number";
     if (commentOverlay.style.display !== "none") {
       hideSelectionMenu();
       return;
     }
     var sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) {
+      hideSelectionMenu();
+      return;
+    }
+    // Without click coordinates (a selectionchange pass, used for mobile's handle-drag
+    // selection UI, which never fires mouseup/touchend on the text itself) a bare caret
+    // tells us nothing about intent - only act on an actual dragged-out selection here.
+    if (sel.isCollapsed && !hasCoords) {
       hideSelectionMenu();
       return;
     }
@@ -806,10 +811,10 @@
       hideSelectionMenu();
       return;
     }
-    // A click in blank space (margins, gaps between verses/chapters) still snaps the
-    // caret to the nearest letter - only treat it as "clicked on text" if the click
+    // A tap/click in blank space (margins, gaps between verses/chapters) still snaps
+    // the caret to the nearest letter - only treat it as "tapped on text" if the tap
     // actually landed on (or very near) the resolved caret position.
-    if (sel.isCollapsed && typeof clickX === "number") {
+    if (sel.isCollapsed && hasCoords) {
       var caretRect = range.getBoundingClientRect();
       var tolerance = 10;
       var closeEnough = clickY >= caretRect.top - tolerance && clickY <= caretRect.bottom + tolerance &&
@@ -824,12 +829,31 @@
     positionSelectionMenu(range);
   }
 
-  // Only show the popup as a direct result of clicking/selecting inside the verse
-  // text itself - never from stale selections, page load, or clicking the grey
-  // panel border around it.
+  // Only show the popup as a direct result of interacting with the verse text itself -
+  // never from stale selections, page load, or clicking the grey panel border around it.
   textEl.addEventListener("mouseup", function (e) {
     var clickX = e.clientX, clickY = e.clientY;
     requestAnimationFrame(function () { checkSelectionForMenu(clickX, clickY); });
+  });
+  textEl.addEventListener("touchend", function (e) {
+    var t = e.changedTouches && e.changedTouches[0];
+    if (!t) return;
+    var clickX = t.clientX, clickY = t.clientY;
+    requestAnimationFrame(function () { checkSelectionForMenu(clickX, clickY); });
+  });
+
+  // Mobile builds a selection by dragging handles, which never fires mouseup/touchend
+  // on the text itself - selectionchange is the only reliable signal for that, so use
+  // it too, but only to react to an actual (non-collapsed) selection; see the early
+  // return above for why a bare caret is ignored on this path.
+  var selectionChangeScheduled = false;
+  document.addEventListener("selectionchange", function () {
+    if (selectionChangeScheduled) return;
+    selectionChangeScheduled = true;
+    requestAnimationFrame(function () {
+      selectionChangeScheduled = false;
+      checkSelectionForMenu();
+    });
   });
 
   document.addEventListener("mousedown", function (e) {
@@ -896,14 +920,6 @@
     var mark = e.target.closest ? e.target.closest("mark.highlight") : null;
     if (!mark) return;
     openCommentEditor(mark);
-  });
-
-  clearHighlightsBtn.addEventListener("click", function () {
-    if (currentIndex === -1) return;
-    var cur = ALL_CHAPTERS[currentIndex];
-    localStorage.removeItem(highlightKey(cur.book, cur.chapter));
-    renderWholeBible();
-    setCurrent(cur.book, cur.chapter, true);
   });
 
   var BIBLEHUB_SLUGS = { "Song of Solomon": "songs" };
@@ -1111,8 +1127,22 @@
     navigateViaLink(bookSelect.value, parseInt(chapterSelect.value, 10));
   });
 
-  prevBtn.addEventListener("click", function () { history.back(); });
-  nextBtn.addEventListener("click", function () { history.forward(); });
+  prevBtn.addEventListener("click", function () {
+    if (navHistoryIndex > 0) {
+      navHistoryIndex--;
+      var c = navHistory[navHistoryIndex];
+      setCurrent(c.book, c.chapter, true);
+      updateNavHistoryButtons();
+    }
+  });
+  nextBtn.addEventListener("click", function () {
+    if (navHistoryIndex < navHistory.length - 1) {
+      navHistoryIndex++;
+      var c = navHistory[navHistoryIndex];
+      setCurrent(c.book, c.chapter, true);
+      updateNavHistoryButtons();
+    }
+  });
 
   function refreshDataUI(loaded) {
     dataBox.style.display = loaded ? "none" : "block";
@@ -1137,12 +1167,15 @@
       : (lastChapter && chapters.indexOf(parseInt(lastChapter, 10)) !== -1) ? parseInt(lastChapter, 10) : chapters[0];
 
     populateChapterOptions(startBook);
-    history.replaceState({ book: startBook, chapter: startChapter }, "", readUrlFor(startBook, startChapter));
+    history.replaceState(null, "", readUrlFor(startBook, startChapter));
+    navHistory = [{ book: startBook, chapter: startChapter }];
+    navHistoryIndex = 0;
     // Delay the initial jump a couple of frames so it doesn't race the IntersectionObserver's
     // own initial "burst" callback for the ~1200 sections it just started observing.
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
         setCurrent(startBook, startChapter, true);
+        updateNavHistoryButtons();
         if (urlTarget && urlTarget.verse && urlTarget.book === startBook && urlTarget.chapter === startChapter) {
           var section = document.getElementById(sectionId(startBook, startChapter));
           var sup = section && Array.prototype.find.call(
