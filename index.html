@@ -971,6 +971,22 @@
     initReader();
     renderCommentsColumn();
     renderActivityColumn();
+
+    // Warms up layout once, during idle time, rather than paying for it the
+    // first time the user actually focuses a text field. The resize listener
+    // a bit further down (search for "content-visibility:auto sections")
+    // explains why a forced layout read is so expensive on this page the
+    // very first time: it makes the browser re-evaluate content-visibility
+    // for all ~1,189 chapter sections in one synchronous pass. Doing that
+    // once now, while nothing is waiting on it, means there's markedly less
+    // left to do in that same pass later, when the keyboard opening forces
+    // one for real.
+    var warmUpLayout = function () { document.body.getBoundingClientRect(); };
+    if (window.requestIdleCallback) {
+      requestIdleCallback(warmUpLayout, { timeout: 3000 });
+    } else {
+      setTimeout(warmUpLayout, 2000);
+    }
   }
 
   // Cached in IndexedDB after the first successful load - otherwise every
