@@ -6,6 +6,20 @@
 <title>Bible Search &amp; Read</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Figtree:wght@400;600;800&display=swap" rel="stylesheet">
+<!-- The Google Custom Search box (cse.js, loaded at the bottom of <body>)
+     pulls in its own additional scripts/styles from these origins once it
+     starts - the DNS/TLS handshake for each is otherwise paid fresh, serially,
+     the moment cse.js first needs them, which is exactly when the search box
+     looks unresponsive on a slow connection. Preconnecting here lets that
+     handshake happen in the background while the rest of the page loads. -->
+<link rel="preconnect" href="https://www.google.com">
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<!-- Moved here (still `async`, so it doesn't block parsing) from the bottom
+     of <body> so the browser starts fetching it immediately instead of only
+     after parsing the rest of this ~3000-line document - the search box is
+     unresponsive until this finishes, so starting it sooner directly cuts
+     that wait. -->
+<script async src="https://cse.google.com/cse.js?cx=c46bbd043c00a4bb7"></script>
 <!-- Notes uses CKEditor 5 as its rich-text backend, vendored locally
      (vendor/ckeditor5/) rather than loaded from ckeditor.com's own CDN -
      CKEditor's CDN build requires a paid license key even for basic use;
@@ -156,6 +170,8 @@
     font-family: inherit;
   }
   .notes-toolbar-btn:hover { background: var(--bg); }
+  .notes-toolbar-btn:disabled { opacity: 0.5; cursor: default; }
+  .notes-toolbar-btn:disabled:hover { background: var(--panel); }
   .notes-tab-bar {
     display: flex;
     flex-wrap: wrap;
@@ -736,38 +752,26 @@
     cursor: pointer;
   }
   .activity-overview-btn:hover { background: var(--bg); }
-  #notes-overview-wrap { padding: 1.25rem; }
-  .overview-date-group { padding-bottom: 1.25rem; margin-bottom: 1.25rem; }
-  .overview-date-group-bordered {
-    border-top: 1px solid var(--line);
-    padding-top: 1.25rem;
-  }
-  .overview-date-heading {
-    font-family: "Figtree", sans-serif;
-    font-weight: 700;
-    font-size: 0.8rem;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    margin: 0 0 0.6rem;
-  }
-  .overview-gratitude-box {
-    display: block;
-    width: 100%;
-    box-sizing: border-box;
-    min-height: 3.5rem;
-    padding: 0.6rem;
-    margin-bottom: 0.75rem;
+  /* The daily gratitude box (a <blockquote> - see ensureTodaysDateBlock) -
+     grows with its own text since it's just a normal block in the document,
+     not a fixed-size field. !important on color/font-style since
+     ckeditor5.css's own blockquote rule loads after this stylesheet. */
+  #notes-editor-wrap .ck.ck-content blockquote {
+    margin: 0.5em 0;
+    padding: 0.6rem 0.9rem;
     border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
     border-radius: 8px;
     background: var(--highlight);
-    color: var(--ink);
-    font: inherit;
-    font-style: italic;
-    resize: vertical;
+    color: var(--ink) !important;
+    font-style: italic !important;
   }
-  .overview-entry-list { margin: 0; padding-left: 1.3rem; }
-  .overview-entry-list li { margin: 0.35rem 0; line-height: 1.4; }
+  #notes-editor-wrap .ck.ck-content blockquote p { margin: 0; }
+  #notes-editor-wrap .ck.ck-content hr {
+    margin: 1.25rem 0;
+    border: none;
+    border-top: 1px solid var(--line);
+  }
 </style>
 </head>
 <body>
@@ -840,7 +844,6 @@
         <div id="notes-editor-wrap" class="panel">
           <div id="notes-editor"></div>
         </div>
-        <div id="notes-overview-wrap" class="panel" style="display:none;"></div>
       </div>
     </section>
 
@@ -852,7 +855,7 @@
   <button id="selection-highlight-verse-btn" type="button">Highlight verse</button>
   <button id="view-biblehub" type="button">View on BibleHub</button>
   <button id="view-xrefs" type="button">Cross References</button>
-  <button id="selection-overview-btn" type="button">Overview</button>
+  <button id="selection-overview-btn" type="button">Add to Notes</button>
 </div>
 
 <div id="xref-overlay" class="modal-overlay" style="display:none;">
@@ -873,7 +876,7 @@
     <div class="comment-actions">
       <button id="comment-biblehub" type="button">View on BibleHub</button>
       <button id="comment-xrefs" type="button">Cross References</button>
-      <button id="comment-overview" type="button">Overview</button>
+      <button id="comment-overview" type="button">Add to Notes</button>
     </div>
     <div class="comment-actions">
       <button id="comment-remove" type="button">Remove comment</button>
@@ -2566,7 +2569,7 @@
       var overviewBtn = document.createElement("button");
       overviewBtn.type = "button";
       overviewBtn.className = "activity-overview-btn";
-      overviewBtn.title = "Add to Overview";
+      overviewBtn.title = "Add to Notes";
       overviewBtn.textContent = "+";
       overviewBtn.addEventListener("click", function (e) {
         e.stopPropagation();
@@ -2630,124 +2633,64 @@
   var notesEditorEl = document.getElementById("notes-editor");
 
   // ============================================================
-  // "Overview" - a special built-in Notes tab (see the selection-menu/
-  // comment-overlay/activity "Overview" buttons) for quickly collecting a
-  // verse, a highlight's comment, or an activity entry as a dated bullet,
-  // newest first. It's NOT free-form CKEditor content like the other tabs -
-  // each entry's date is set once at creation and never changes even if the
-  // text is edited later, and every date gets its own "Thank God for:"
-  // gratitude box - neither of those survive being modeled as plain rich
-  // text, so this renders its own panel (#notes-overview-wrap) instead.
+  // Every normal note tab (everything except Overview) gets a date heading +
+  // "Thank God for:" gratitude box stamped at the top the first time it's
+  // opened each day - see ensureTodaysDateBlock, called whenever a tab
+  // becomes the active one. The heading/box are ordinary editable content
+  // (not a separately-tracked field), which is why editing an entry later
+  // can't retroactively change its date, and days are separated by a thin
+  // <hr> (the bundle's HorizontalLine plugin, enabled in initNotesEditor).
+  // The gratitude box is a <blockquote> so it grows with its text rather
+  // than being a fixed-size box.
+  //
+  // Overview is the one exception - a plain, undated bullet list (newest at
+  // the top) that the selection-menu/comment-editor/activity-row "Overview"
+  // buttons add to; see addOverviewEntry.
   // ============================================================
   var OVERVIEW_TAB_NAME = "Overview";
-  var OVERVIEW_ENTRIES_KEY = "notes:overviewEntries";
-  var OVERVIEW_GRATITUDE_KEY = "notes:overviewGratitude";
-
-  function loadOverviewEntries() {
-    try {
-      var saved = JSON.parse(localStorage.getItem(OVERVIEW_ENTRIES_KEY) || "[]");
-      return Array.isArray(saved) ? saved : [];
-    } catch (e) { return []; }
+  var GRATITUDE_HTML = "<blockquote><p><i>Thank God for: </i></p></blockquote>";
+  function isOverviewTab(tab) { return !!tab && tab.name === OVERVIEW_TAB_NAME; }
+  function escapeHtml(s) {
+    var div = document.createElement("div");
+    div.textContent = s;
+    return div.innerHTML;
   }
-  function loadOverviewGratitude() {
-    try {
-      var saved = JSON.parse(localStorage.getItem(OVERVIEW_GRATITUDE_KEY) || "{}");
-      return (saved && typeof saved === "object") ? saved : {};
-    } catch (e) { return {}; }
+  function todaysHeadingHtml() {
+    var heading = new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+    return "<h4>" + escapeHtml(heading) + "</h4>";
   }
-  var overviewEntries = loadOverviewEntries();
-  var overviewGratitude = loadOverviewGratitude();
-  function saveOverviewEntries() { localStorage.setItem(OVERVIEW_ENTRIES_KEY, JSON.stringify(overviewEntries)); }
-  function saveOverviewGratitude() { localStorage.setItem(OVERVIEW_GRATITUDE_KEY, JSON.stringify(overviewGratitude)); }
-
-  function todayDateKey() {
-    var d = new Date();
-    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-  }
-  function formatOverviewDateHeading(dateKey) {
-    var d = new Date(dateKey + "T00:00:00");
-    return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" });
-  }
-
-  function isOverviewTab(tab) { return !!tab && (tab.isOverview || tab.name === OVERVIEW_TAB_NAME); }
-  function ensureOverviewTabExists() {
-    if (notesTabs.some(isOverviewTab)) return;
-    notesTabs.push({ id: "tab-" + Date.now(), name: OVERVIEW_TAB_NAME, isOverview: true, content: "" });
+  // Stamps today's date + gratitude box at the top of a (non-Overview) tab,
+  // unless it's already there - safe to call every time a tab is shown.
+  function ensureTodaysDateBlock(tab) {
+    if (!tab || isOverviewTab(tab)) return;
+    var headingHtml = todaysHeadingHtml();
+    if (tab.content.indexOf(headingHtml) === 0) return;
+    var newBlock = headingHtml + GRATITUDE_HTML;
+    tab.content = tab.content ? newBlock + "<hr>" + tab.content : newBlock;
     saveNotesTabs();
   }
 
-  // Entries are always unshifted (newest first overall) and never
-  // reordered afterward, so consecutive same-date runs are already in the
-  // right order (newest date, newest-within-date) just by grouping them.
-  function groupOverviewEntries() {
-    var groups = [];
-    overviewEntries.forEach(function (entry) {
-      var last = groups[groups.length - 1];
-      if (last && last.date === entry.date) last.entries.push(entry);
-      else groups.push({ date: entry.date, entries: [entry] });
-    });
-    return groups;
+  function getOrCreateOverviewTab() {
+    var tab = notesTabs.filter(isOverviewTab)[0];
+    if (!tab) {
+      tab = { id: "tab-" + Date.now(), name: OVERVIEW_TAB_NAME, content: "" };
+      notesTabs.push(tab);
+      saveNotesTabs();
+      renderNotesTabBar();
+    }
+    return tab;
   }
 
   function addOverviewEntry(text) {
     if (!text) return;
-    var dateKey = todayDateKey();
-    if (!(dateKey in overviewGratitude)) {
-      overviewGratitude[dateKey] = "Thank God for: ";
-      saveOverviewGratitude();
-    }
-    overviewEntries.unshift({
-      id: "entry-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
-      date: dateKey,
-      text: text
-    });
-    saveOverviewEntries();
-    ensureOverviewTabExists();
-    renderNotesTabBar();
-    if (getActiveNotesTab().isOverview) renderOverviewPanel();
-  }
-
-  function renderOverviewPanel() {
-    var wrap = document.getElementById("notes-overview-wrap");
-    if (!wrap) return;
-    wrap.innerHTML = "";
-    var groups = groupOverviewEntries();
-    var today = todayDateKey();
-    if (!groups.length || groups[0].date !== today) {
-      groups.unshift({ date: today, entries: [] });
-    }
-    groups.forEach(function (group, idx) {
-      var section = document.createElement("div");
-      section.className = "overview-date-group" + (idx > 0 ? " overview-date-group-bordered" : "");
-
-      var heading = document.createElement("div");
-      heading.className = "overview-date-heading";
-      heading.textContent = formatOverviewDateHeading(group.date);
-      section.appendChild(heading);
-
-      var gratitudeBox = document.createElement("textarea");
-      gratitudeBox.className = "overview-gratitude-box";
-      gratitudeBox.rows = 2;
-      gratitudeBox.value = overviewGratitude[group.date] || "Thank God for: ";
-      gratitudeBox.addEventListener("input", function () {
-        overviewGratitude[group.date] = gratitudeBox.value;
-        saveOverviewGratitude();
-      });
-      section.appendChild(gratitudeBox);
-
-      if (group.entries.length) {
-        var list = document.createElement("ul");
-        list.className = "overview-entry-list";
-        group.entries.forEach(function (entry) {
-          var li = document.createElement("li");
-          li.textContent = entry.text;
-          list.appendChild(li);
-        });
-        section.appendChild(list);
-      }
-
-      wrap.appendChild(section);
-    });
+    var tab = getOrCreateOverviewTab();
+    var bulletHtml = "<li>" + escapeHtml(text) + "</li>";
+    var ulOpenTag = tab.content.match(/^\s*<ul[^>]*>/i);
+    tab.content = ulOpenTag
+      ? tab.content.slice(0, ulOpenTag[0].length) + bulletHtml + tab.content.slice(ulOpenTag[0].length)
+      : "<ul>" + bulletHtml + "</ul>" + tab.content;
+    saveNotesTabs();
+    if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
   }
 
   function loadNotesTabs() {
@@ -2771,36 +2714,21 @@
   }
   // Flushes the editor's current content into its tab before anything (a tab
   // switch, adding/deleting a tab) replaces what the editor is showing.
-  // Overview isn't CKEditor content (see further down) so there's nothing to
-  // flush for it.
   function saveActiveNotesTabContent() {
     if (!notesEditor) return;
     var tab = getActiveNotesTab();
-    if (!tab || isOverviewTab(tab)) return;
+    if (!tab) return;
     tab.content = notesEditor.getData();
     saveNotesTabs();
   }
-  // Shows whichever of the CKEditor view or the Overview panel matches the
-  // now-active tab, and feeds it the right content. Safe to call before
+  // Feeds the now-active tab's content into the editor. Safe to call before
   // CKEditor has finished loading (it's lazy - see ensureNotesEditorLoaded) -
-  // the CKEditor side is just skipped until notesEditor exists, since
-  // initNotesEditor() reads getActiveNotesTab() itself once it does.
+  // it's just a no-op until notesEditor exists, since initNotesEditor() reads
+  // getActiveNotesTab() itself once it does.
   function showActiveNotesTabContent() {
     var tab = getActiveNotesTab();
-    var overviewWrap = document.getElementById("notes-overview-wrap");
-    var editorWrap = document.getElementById("notes-editor-wrap");
-    var toolbar = document.getElementById("notes-toolbar");
-    if (isOverviewTab(tab)) {
-      if (editorWrap) editorWrap.style.display = "none";
-      if (toolbar) toolbar.style.display = "none";
-      if (overviewWrap) overviewWrap.style.display = "block";
-      renderOverviewPanel();
-    } else {
-      if (overviewWrap) overviewWrap.style.display = "none";
-      if (editorWrap) editorWrap.style.display = "";
-      if (toolbar) toolbar.style.display = "";
-      if (notesEditor) notesEditor.setData(tab.content || "<p></p>");
-    }
+    ensureTodaysDateBlock(tab);
+    if (notesEditor) notesEditor.setData(tab.content || "<p></p>");
   }
   function switchNotesTab(id) {
     if (id === activeNotesTabId) return;
@@ -2814,7 +2742,7 @@
     showTextPrompt("Name for the new note:", "Untitled").then(function (name) {
       if (name === null) return;
       saveActiveNotesTabContent();
-      var tab = { id: "tab-" + Date.now(), name: name.trim() || "Untitled", content: "<p></p>" };
+      var tab = { id: "tab-" + Date.now(), name: name.trim() || "Untitled", content: "" };
       notesTabs.push(tab);
       activeNotesTabId = tab.id;
       localStorage.setItem(NOTES_ACTIVE_TAB_KEY, tab.id);
@@ -2928,6 +2856,11 @@
       b.type = "button";
       b.textContent = text;
       b.title = title;
+      // Disabled until the editor actually loads (see ensureNotesEditorLoaded/
+      // initNotesEditor) - it's a ~2MB lazy-loaded bundle, so there's a real
+      // gap where these would otherwise silently do nothing when tapped,
+      // which reads as broken rather than loading.
+      b.disabled = true;
       b.addEventListener("click", onClick);
       row.appendChild(b);
       return b;
@@ -2962,6 +2895,18 @@
     });
     makeBtn("⇤ Outdent", "Decrease indent", outdentNotesLine);
     makeBtn("⇥ Indent", "Increase indent", indentNotesLine);
+
+    // Unlike the formatting buttons above, this just switches tabs - it
+    // works immediately rather than waiting on CKEditor to finish loading,
+    // so it's added directly rather than through makeBtn (which disables
+    // everything it creates until the editor is ready).
+    var overviewTabBtn = document.createElement("button");
+    overviewTabBtn.className = "notes-toolbar-btn";
+    overviewTabBtn.type = "button";
+    overviewTabBtn.textContent = "Overview";
+    overviewTabBtn.title = "Jump to the Overview note";
+    overviewTabBtn.addEventListener("click", function () { switchNotesTab(getOrCreateOverviewTab().id); });
+    row.appendChild(overviewTabBtn);
   }
 
   function initNotesEditor() {
@@ -2976,7 +2921,7 @@
     var CK = window.CKEDITOR;
     CK.DecoupledEditor.create(notesEditorEl, {
       licenseKey: "GPL",
-      plugins: [CK.Essentials, CK.Paragraph, CK.Heading, CK.List, CK.TodoList, CK.Highlight],
+      plugins: [CK.Essentials, CK.Paragraph, CK.Heading, CK.List, CK.TodoList, CK.Highlight, CK.BlockQuote, CK.HorizontalLine],
       // Only paragraph/heading4 ("Title") are offered, matching the toolbar's
       // single "T Title" toggle button rather than a full heading-level picker.
       heading: {
@@ -2992,13 +2937,14 @@
           { model: "yellowMarker", class: "marker-yellow", title: "Yellow", color: "#ffee00", type: "marker" }
         ]
       },
-      initialData: getActiveNotesTab().content || "<p></p>"
+      initialData: (function () { var tab = getActiveNotesTab(); ensureTodaysDateBlock(tab); return tab.content || "<p></p>"; })()
     }).then(function (editor) {
       // DecoupledEditor doesn't attach its own toolbar/UI anywhere by default -
       // this is driven entirely through the Checklist/Title/Outdent/Indent
       // buttons above instead, so editor.ui.view.toolbar.element is
       // deliberately never inserted into the page.
       notesEditor = editor;
+      document.querySelectorAll("#notes-toolbar .notes-toolbar-btn").forEach(function (b) { b.disabled = false; });
 
       // Tab/Shift+Tab indent/outdent the current line - same commands as the
       // Indent/Outdent buttons. CKEditor's List plugin doesn't bind Tab for
@@ -3009,6 +2955,24 @@
           data.preventDefault();
           evt.stop();
           if (data.domEvent.shiftKey) outdentNotesLine(); else indentNotesLine();
+          return;
+        }
+        // Plain Enter inside the gratitude box (a blockquote - see
+        // ensureTodaysDateBlock) would otherwise start a new block, which on
+        // an empty line is CKEditor's built-in signal to exit the quote
+        // entirely - splitting the gratitude box into two instead of just
+        // giving a newline within it. A soft break (Shift+Enter's own
+        // command) stays inside the same block no matter what.
+        if (data.domEvent.key === "Enter" && !data.domEvent.shiftKey) {
+          var pos = editor.model.document.selection.getFirstPosition();
+          for (var node = pos && pos.parent; node; node = node.parent) {
+            if (node.name === "blockQuote") {
+              data.preventDefault();
+              evt.stop();
+              editor.execute("shiftEnter");
+              return;
+            }
+          }
         }
       }, { priority: "high" });
 
@@ -3073,6 +3037,5 @@
     setTimeout(function () { notesVisibilityObserver.observe(colNotesEl); }, 800);
   }
 </script>
-<script async src="https://cse.google.com/cse.js?cx=c46bbd043c00a4bb7"></script>
 </body>
 </html>
