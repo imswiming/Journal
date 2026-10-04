@@ -156,6 +156,38 @@
     font-family: inherit;
   }
   .notes-toolbar-btn:hover { background: var(--bg); }
+  .notes-tab-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.6rem;
+  }
+  .notes-tab {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--panel);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.3rem 0.5rem 0.3rem 0.8rem;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .notes-tab.active { color: var(--ink); border-color: var(--accent); }
+  .notes-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 50%;
+    color: var(--muted);
+  }
+  .notes-tab-close:hover { background: var(--bg); color: var(--ink); }
+  .notes-tab-add { padding: 0.3rem 0.65rem; color: var(--accent); }
   #notes-editor-wrap { min-height: 50vh; }
   /* CKEditor ships its own light-theme chrome (border, box-shadow, base text
      color) on .ck-content - overridden here to blend into .panel instead.
@@ -737,6 +769,7 @@
     <section class="column" id="col-notes">
       <div class="column-pad">
         <h1>Notes</h1>
+        <div id="notes-tab-bar" class="notes-tab-bar"></div>
         <div id="notes-toolbar" class="notes-toolbar-row"></div>
         <div id="notes-editor-wrap" class="panel">
           <div id="notes-editor"></div>
@@ -2342,14 +2375,130 @@
 
   // ============================================================
   // Notes column (CKEditor 5 rich-text outline editor - ported from
-  // imswiming/Flowchart2's Notes panel, trimmed down to just the editor
-  // itself: no chart-scoped/global tabs, remote sync, drawing inserts, or
-  // full-screen split panes, since none of that applies here. Autosaves to
-  // a single localStorage blob instead of the source app's per-chart notes.)
+  // imswiming/Flowchart2's Notes panel, trimmed down to just the editor and
+  // its tab bar: no remote sync, drawing inserts, or full-screen split panes,
+  // since none of that applies here. Each tab is just a separate
+  // {id, name, content} note, all saved together as one JSON array.)
   // ============================================================
-  var NOTES_KEY = "notes:content";
+  var NOTES_TABS_KEY = "notes:tabs";
+  var NOTES_ACTIVE_TAB_KEY = "notes:activeTab";
+  var NOTES_LEGACY_KEY = "notes:content"; // pre-tabs single-note blob, migrated below
   var notesEditor = null;
   var notesEditorEl = document.getElementById("notes-editor");
+
+  function loadNotesTabs() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(NOTES_TABS_KEY) || "null");
+      if (Array.isArray(saved) && saved.length) return saved;
+    } catch (e) { /* fall through to a fresh/migrated tab list */ }
+    var legacyContent = localStorage.getItem(NOTES_LEGACY_KEY);
+    return [{ id: "tab-" + Date.now(), name: "Notes", content: legacyContent || "<p></p>" }];
+  }
+  var notesTabs = loadNotesTabs();
+  var activeNotesTabId = localStorage.getItem(NOTES_ACTIVE_TAB_KEY);
+  if (!notesTabs.some(function (t) { return t.id === activeNotesTabId; })) {
+    activeNotesTabId = notesTabs[0].id;
+  }
+
+  function saveNotesTabs() { localStorage.setItem(NOTES_TABS_KEY, JSON.stringify(notesTabs)); }
+  function getActiveNotesTab() {
+    var found = notesTabs.filter(function (t) { return t.id === activeNotesTabId; })[0];
+    return found || notesTabs[0];
+  }
+  // Flushes the editor's current content into its tab before anything (a tab
+  // switch, adding/deleting a tab) replaces what the editor is showing.
+  function saveActiveNotesTabContent() {
+    if (!notesEditor) return;
+    var tab = getActiveNotesTab();
+    if (!tab) return;
+    tab.content = notesEditor.getData();
+    saveNotesTabs();
+  }
+  function switchNotesTab(id) {
+    if (id === activeNotesTabId || !notesEditor) return;
+    saveActiveNotesTabContent();
+    activeNotesTabId = id;
+    localStorage.setItem(NOTES_ACTIVE_TAB_KEY, id);
+    notesEditor.setData(getActiveNotesTab().content || "<p></p>");
+    renderNotesTabBar();
+  }
+  function addNotesTab() {
+    var name = prompt("Name for the new note:", "Untitled");
+    if (name === null) return;
+    saveActiveNotesTabContent();
+    var tab = { id: "tab-" + Date.now(), name: name.trim() || "Untitled", content: "<p></p>" };
+    notesTabs.push(tab);
+    activeNotesTabId = tab.id;
+    localStorage.setItem(NOTES_ACTIVE_TAB_KEY, tab.id);
+    saveNotesTabs();
+    if (notesEditor) notesEditor.setData(tab.content);
+    renderNotesTabBar();
+  }
+  function renameNotesTab(id) {
+    var tab = notesTabs.filter(function (t) { return t.id === id; })[0];
+    if (!tab) return;
+    var name = prompt("Rename this note:", tab.name);
+    if (name === null) return;
+    tab.name = name.trim() || tab.name;
+    saveNotesTabs();
+    renderNotesTabBar();
+  }
+  function deleteNotesTab(id) {
+    if (notesTabs.length <= 1) return; // always keep at least one note
+    var idx = notesTabs.map(function (t) { return t.id; }).indexOf(id);
+    if (idx === -1) return;
+    notesTabs.splice(idx, 1);
+    saveNotesTabs();
+    if (activeNotesTabId === id) {
+      activeNotesTabId = notesTabs[Math.max(0, idx - 1)].id;
+      localStorage.setItem(NOTES_ACTIVE_TAB_KEY, activeNotesTabId);
+      if (notesEditor) notesEditor.setData(getActiveNotesTab().content || "<p></p>");
+    }
+    renderNotesTabBar();
+  }
+
+  function renderNotesTabBar() {
+    var bar = document.getElementById("notes-tab-bar");
+    if (!bar) return;
+    bar.innerHTML = "";
+    notesTabs.forEach(function (tab) {
+      var isActive = tab.id === activeNotesTabId;
+      var tabEl = document.createElement("button");
+      tabEl.type = "button";
+      tabEl.className = "notes-tab" + (isActive ? " active" : "");
+      // dblclick doesn't fire reliably on phones - tapping a tab that's
+      // already active renames it instead, same workaround Flowchart2 uses.
+      tabEl.title = isActive ? "Tap again to rename" : tab.name;
+      tabEl.addEventListener("click", function () {
+        if (isActive) renameNotesTab(tab.id); else switchNotesTab(tab.id);
+      });
+
+      var label = document.createElement("span");
+      label.textContent = tab.name || "Untitled";
+      tabEl.appendChild(label);
+
+      if (notesTabs.length > 1) {
+        var closeBtn = document.createElement("span");
+        closeBtn.className = "notes-tab-close";
+        closeBtn.textContent = "×";
+        closeBtn.title = "Delete this note";
+        closeBtn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          deleteNotesTab(tab.id);
+        });
+        tabEl.appendChild(closeBtn);
+      }
+      bar.appendChild(tabEl);
+    });
+
+    var addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "notes-tab notes-tab-add";
+    addBtn.title = "Add a note";
+    addBtn.textContent = "+";
+    addBtn.addEventListener("click", addNotesTab);
+    bar.appendChild(addBtn);
+  }
 
   function notesActiveListType() {
     if (!notesEditor) return null;
@@ -2435,7 +2584,6 @@
       return;
     }
     var CK = window.CKEDITOR;
-    var saved = localStorage.getItem(NOTES_KEY);
     CK.DecoupledEditor.create(notesEditorEl, {
       licenseKey: "GPL",
       plugins: [CK.Essentials, CK.Paragraph, CK.Heading, CK.List, CK.TodoList, CK.Highlight],
@@ -2454,7 +2602,7 @@
           { model: "yellowMarker", class: "marker-yellow", title: "Yellow", color: "#ffee00", type: "marker" }
         ]
       },
-      initialData: saved || "<p></p>"
+      initialData: getActiveNotesTab().content || "<p></p>"
     }).then(function (editor) {
       // DecoupledEditor doesn't attach its own toolbar/UI anywhere by default -
       // this is driven entirely through the Checklist/Title/Outdent/Indent
@@ -2477,9 +2625,7 @@
       var saveTimer = null;
       editor.model.document.on("change:data", function () {
         clearTimeout(saveTimer);
-        saveTimer = setTimeout(function () {
-          localStorage.setItem(NOTES_KEY, editor.getData());
-        }, 400);
+        saveTimer = setTimeout(saveActiveNotesTabContent, 400);
       });
     }).catch(function (err) {
       console.error("Failed to create Notes editor:", err);
@@ -2510,6 +2656,7 @@
   }
 
   buildNotesToolbar();
+  renderNotesTabBar();
   var colNotesEl = document.getElementById("col-notes");
   if (colNotesEl) {
     // threshold 0.05 (not the default 0): at exactly scrollLeft 375 (Bible,
