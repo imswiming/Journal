@@ -10,12 +10,10 @@
      (vendor/ckeditor5/) rather than loaded from ckeditor.com's own CDN -
      CKEditor's CDN build requires a paid license key even for basic use;
      only the npm-distributed build (what's vendored here) accepts the
-     free 'GPL' key (see initNotesEditor's licenseKey config). Loaded with
-     `defer` so the ~2MB bundle doesn't block the Bible text from rendering;
-     initNotesEditor() is only called once DOMContentLoaded fires, by which
-     point a deferred script is guaranteed to have already run. -->
-<link rel="stylesheet" href="vendor/ckeditor5/ckeditor5.css">
-<script src="vendor/ckeditor5/ckeditor5.umd.js" defer></script>
+     free 'GPL' key (see initNotesEditor's licenseKey config). At ~2MB, it's
+     NOT loaded here - see ensureNotesEditorLoaded, which injects it lazily
+     only once the Notes column actually scrolls into view, so everyone who
+     never opens Notes never pays for it. -->
 <style>
   :root {
     --bg: #eef2f6;
@@ -826,6 +824,20 @@
     dataGate.style.display = loaded ? "none" : "block";
     appEl.style.display = loaded ? "block" : "none";
     if (!loaded) return;
+    // Search is the mobile landing page by default - set synchronously right
+    // as #app actually becomes visible (not via scrollIntoView, which only
+    // runs on a later rAF). Doing this any earlier is a no-op: #app is
+    // display:none until this point, so every column's offsetLeft reads as 0
+    // beforehand. Without this, the Notes/Bible/Search pager order (see
+    // #col-notes's `order`) would otherwise leave Notes showing at the
+    // default scrollLeft of 0 - including to the Notes column's own
+    // visibility check (see ensureNotesEditorLoaded), loading it unasked for.
+    // A deep link (see initReader's urlTarget) overrides this with its own
+    // later jump to Read.
+    if (!isDesktopColumns()) {
+      var defaultLandingCol = document.getElementById("col-search");
+      if (defaultLandingCol) columnsWrap.scrollLeft = defaultLandingCol.offsetLeft;
+    }
     initReader();
     renderCommentsColumn();
     renderActivityColumn();
@@ -1798,8 +1810,20 @@
     textTouchStartX = t.clientX;
     textTouchStartY = t.clientY;
   }, { passive: true });
+  // A plain tap (not a drag-selection) landing on an existing highlight opens
+  // its comment editor instead (see the textEl "click" listener below, which
+  // fires slightly after mouseup/touchend). Without this check, the selection
+  // menu would flash on screen first - shown here, then immediately hidden
+  // and replaced by the comment box once the click arrives - since at this
+  // point the comment box hasn't opened yet. A real drag-selection that
+  // happens to end on/over a highlight is unaffected (isCollapsed is false).
+  function tapTargetOpensCommentEditor(target) {
+    var sel = window.getSelection();
+    return !!(sel && sel.isCollapsed && target.closest && target.closest("mark.highlight"));
+  }
   textEl.addEventListener("mouseup", function (e) {
     if (Date.now() - lastTouchTime < 600) return;
+    if (tapTargetOpensCommentEditor(e.target)) return;
     var clickX = e.clientX, clickY = e.clientY;
     requestAnimationFrame(function () { checkSelectionForMenu(clickX, clickY); });
   });
@@ -1816,6 +1840,7 @@
       textTouchStartX = null;
       if (Math.abs(moveX) > 10 || Math.abs(moveY) > 10) return;
     }
+    if (tapTargetOpensCommentEditor(e.target)) return;
     var clickX = t.clientX, clickY = t.clientY;
     requestAnimationFrame(function () { checkSelectionForMenu(clickX, clickY); });
   });
@@ -2122,14 +2147,7 @@
           );
           if (sup) sup.scrollIntoView({ block: "center" });
         }
-        if (urlTarget) {
-          scrollToColumn("col-read");
-        } else if (!isDesktopColumns()) {
-          // Search is still the mobile landing page by default - without this,
-          // the Notes/Bible/Search reorder above (see #col-notes's `order`)
-          // would otherwise land on Notes, since that's now first in line.
-          scrollToColumn("col-search", true);
-        }
+        if (urlTarget) scrollToColumn("col-read");
       });
     });
   }
@@ -2405,8 +2423,9 @@
   function initNotesEditor() {
     if (!notesEditorEl) return;
     if (!window.CKEDITOR) {
-      // vendor/ckeditor5/ckeditor5.umd.js (see the <head>) failed to load -
-      // surface this rather than silently showing an empty, uneditable box.
+      // vendor/ckeditor5/ckeditor5.umd.js (see ensureNotesEditorLoaded) failed
+      // to load - surface this rather than silently showing an empty,
+      // uneditable box.
       notesEditorEl.textContent = "Notes editor failed to load - check your connection and reload.";
       return;
     }
@@ -2463,11 +2482,52 @@
     });
   }
 
+  // CKEditor's vendored bundle is ~2MB - at ~1100px+ Notes sits right there in
+  // the desktop layout, but on mobile it's one of three pager columns most
+  // visits never swipe to, so it's fetched and initialized only once the
+  // column actually scrolls into view, not unconditionally on every load.
+  var notesLoadStarted = false;
+  function ensureNotesEditorLoaded() {
+    if (notesLoadStarted) return;
+    notesLoadStarted = true;
+    if (notesEditorEl) notesEditorEl.textContent = "Loading editor…";
+    var link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "vendor/ckeditor5/ckeditor5.css";
+    document.head.appendChild(link);
+    var script = document.createElement("script");
+    script.src = "vendor/ckeditor5/ckeditor5.umd.js";
+    script.onload = initNotesEditor;
+    script.onerror = function () {
+      if (notesEditorEl) notesEditorEl.textContent = "Notes editor failed to load - check your connection and reload.";
+    };
+    document.head.appendChild(script);
+  }
+
   buildNotesToolbar();
-  if (window.CKEDITOR) {
-    initNotesEditor();
-  } else {
-    document.addEventListener("DOMContentLoaded", initNotesEditor);
+  var colNotesEl = document.getElementById("col-notes");
+  if (colNotesEl) {
+    // threshold 0.05 (not the default 0): at exactly scrollLeft 375 (Bible,
+    // Notes's immediate neighbor in the pager), Notes' rect sits touching the
+    // viewport edge with zero actual overlap - some browsers still report
+    // that boundary touch as "intersecting" at threshold 0, which would defeat
+    // the whole point of lazy-loading this. Requiring a sliver of real overlap
+    // avoids that false positive while still firing well before it's fully
+    // swiped into view.
+    var notesVisibilityObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          ensureNotesEditorLoaded();
+          notesVisibilityObserver.disconnect();
+        }
+      });
+    }, { threshold: 0.05 });
+    // Not armed immediately: the very first layout pass (before the page's
+    // initial column/scroll position has settled - e.g. landing on Search, or
+    // jumping to a saved reading position) can briefly and spuriously report
+    // Notes as on-screen, which would defeat the whole point of lazy-loading
+    // it. A short delay lets that settle first.
+    setTimeout(function () { notesVisibilityObserver.observe(colNotesEl); }, 800);
   }
 </script>
 <script async src="https://cse.google.com/cse.js?cx=c46bbd043c00a4bb7"></script>
