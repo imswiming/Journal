@@ -881,24 +881,78 @@
     renderActivityColumn();
   }
 
-  Promise.all(BOOKS_IN_ORDER.map(function (book) {
-    var fileName = BIBLE_FILE_OVERRIDES[book] || book;
-    return fetch(BIBLE_DATA_DIR + encodeURIComponent(fileName) + ".json")
-      .then(function (res) {
-        if (!res.ok) throw new Error("fetch failed for " + book + ": " + res.status);
-        return res.json();
-      })
-      .then(function (bookJson) {
-        var chapters = {};
-        bookJson.chapters.forEach(function (ch) {
-          var verses = {};
-          ch.verses.forEach(function (v) { verses[String(v.verse)] = v.text; });
-          chapters[String(ch.chapter)] = verses;
-        });
-        nivData = nivData || {};
-        nivData[book] = chapters;
+  // Cached in IndexedDB after the first successful load - otherwise every
+  // single visit re-downloads and re-parses ~6MB across 66 requests, which is
+  // slow enough on mobile data to make the whole app feel sluggish right out
+  // of the gate. Bump the key's version suffix if nivData's shape ever
+  // changes, so an old cached shape doesn't linger.
+  var BIBLE_DB_NAME = "bible-data-cache";
+  var BIBLE_STORE_NAME = "kv";
+  var BIBLE_CACHE_KEY = "nivData-v1";
+
+  function openBibleDb() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(BIBLE_DB_NAME, 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore(BIBLE_STORE_NAME); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+  function bibleDbGet(key) {
+    return openBibleDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(BIBLE_STORE_NAME, "readonly");
+        var req = tx.objectStore(BIBLE_STORE_NAME).get(key);
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
       });
-  })).then(function () {
+    });
+  }
+  function bibleDbSet(key, value) {
+    return openBibleDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(BIBLE_STORE_NAME, "readwrite");
+        tx.objectStore(BIBLE_STORE_NAME).put(value, key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  function fetchBibleDataFromNetwork() {
+    return Promise.all(BOOKS_IN_ORDER.map(function (book) {
+      var fileName = BIBLE_FILE_OVERRIDES[book] || book;
+      return fetch(BIBLE_DATA_DIR + encodeURIComponent(fileName) + ".json")
+        .then(function (res) {
+          if (!res.ok) throw new Error("fetch failed for " + book + ": " + res.status);
+          return res.json();
+        })
+        .then(function (bookJson) {
+          var chapters = {};
+          bookJson.chapters.forEach(function (ch) {
+            var verses = {};
+            ch.verses.forEach(function (v) { verses[String(v.verse)] = v.text; });
+            chapters[String(ch.chapter)] = verses;
+          });
+          nivData = nivData || {};
+          nivData[book] = chapters;
+        });
+    })).then(function () {
+      // Fire-and-forget - the app shouldn't wait on the cache write to render.
+      bibleDbSet(BIBLE_CACHE_KEY, nivData).catch(function () { /* e.g. private browsing - just re-fetch next time */ });
+    });
+  }
+
+  bibleDbGet(BIBLE_CACHE_KEY).then(function (cached) {
+    if (cached) {
+      nivData = cached;
+      return;
+    }
+    return fetchBibleDataFromNetwork();
+  }).catch(function () {
+    // IndexedDB unavailable/broken - fall back to a plain network fetch.
+    return fetchBibleDataFromNetwork();
+  }).then(function () {
     refreshDataUI(true);
   }).catch(function (err) {
     console.error(err);
