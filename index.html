@@ -2314,7 +2314,22 @@
   }, { passive: true });
   readColumn.addEventListener("scroll", hideSelectionMenu, { passive: true });
   readColumn.addEventListener("scroll", function () { scheduleCommentsLayout(); }, { passive: true });
-  window.addEventListener("resize", function () { scheduleCommentsLayout(); });
+  // Skipped while a text field has focus: on mobile, the on-screen keyboard
+  // opening/closing fires this same "resize" (the visual viewport shrinks),
+  // and layoutCommentsDesktop/layoutMobileCommentBadges force a synchronous
+  // layout read (getBoundingClientRect/offsetLeft) right as it happens. On a
+  // page this size - the whole Bible is ~1,189 content-visibility:auto
+  // sections, even the ones sitting off-screen in another pager column still
+  // have to be re-evaluated once anything forces layout after a real resize -
+  // that one synchronous read is enough to freeze the page for several
+  // seconds. Comment badge positions genuinely don't matter while the user
+  // is busy typing into a field anyway.
+  window.addEventListener("resize", function () {
+    var active = document.activeElement;
+    var isTyping = active && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable);
+    if (isTyping) return;
+    scheduleCommentsLayout();
+  });
 
   var positionSaveScheduled = false;
   function saveLastPosition() {
