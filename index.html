@@ -58,6 +58,13 @@
     font-family: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
     overscroll-behavior: none;
   }
+  /* 1px taller than the viewport on purpose - just enough real scroll room for
+     the window.scrollTo nudge below (search "nudge the real page scroll") to
+     actually move something, which is what gets a mobile browser's own
+     address bar to collapse/reappear. Scrolling here is otherwise invisible:
+     same background all the way down, and nothing else ever needs it, since
+     everything scrollable in the app is one of the columns, not the page. */
+  body { min-height: calc(100% + 1px); }
   h1 {
     font-size: clamp(1.4rem, 4vw, 1.8rem);
     font-weight: 800;
@@ -85,7 +92,16 @@
   }
 
   /* ---------- Column shell ---------- */
+  /* Fixed (not in normal flow) so hiding it (.tabs-hidden) reveals content
+     that was already sitting there underneath, rather than leaving behind an
+     empty gap the size of the bar - content panels reserve room for it via
+     padding-top below instead of via .columns-wrap's own height. */
   .column-tabs {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
     display: flex;
     gap: 0.5rem;
     padding: 0.75rem 1rem;
@@ -114,8 +130,8 @@
   }
   .columns-wrap {
     display: flex;
-    height: calc(100vh - 56px);
-    height: calc(100dvh - 56px);
+    height: 100vh;
+    height: 100dvh;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
@@ -128,6 +144,10 @@
     scroll-snap-align: start;
     overflow-y: auto;
     height: 100%;
+    /* Room for the fixed .column-tabs bar above (its own height - see there) -
+       scrolling this column up reveals that content right behind the bar,
+       the same content .tabs-hidden also reveals when the bar slides away. */
+    padding-top: 56px;
     scrollbar-width: none;
   }
   .column::-webkit-scrollbar { display: none; }
@@ -267,6 +287,7 @@
     .column {
       flex: 1 1 0;
       max-width: none;
+      padding-top: 0;
       border-right: 1px solid var(--line);
     }
     .column:last-child { border-right: none; }
@@ -1180,8 +1201,14 @@
     }
     if (scrollTop > tabsLastScrollY && scrollTop > columnTabsEl.offsetHeight) {
       columnTabsEl.classList.add("tabs-hidden");
+      // Nudges the real page scroll (see body's own min-height) in the same
+      // direction - a mobile browser's address bar only collapses in
+      // response to the actual page scrolling, which never otherwise
+      // happens here since every column scrolls within itself, not the page.
+      window.scrollTo(0, 1);
     } else if (scrollTop < tabsLastScrollY) {
       columnTabsEl.classList.remove("tabs-hidden");
+      window.scrollTo(0, 0);
     }
     tabsLastScrollY = scrollTop;
   }
@@ -1287,12 +1314,17 @@
     var deltaX = touch.clientX - swipeStartX;
     var ids = getColumnIds();
     var startIdx = swipeStartColIndex;
+    // Instant (not smooth): a smooth scroll from one end to the other would
+    // continuously animate across the whole scroll range in between,
+    // visibly passing over Bible in the middle the whole way there even
+    // though it only ever actually stops on Notes/Search - this makes it a
+    // single direct jump instead, as if they sat right next to each other.
     if (startIdx === 0 && deltaX > SWIPE_WRAP_THRESHOLD) {
       swipeStartColIndex = null;
-      scrollToColumn(ids[ids.length - 1]);
+      scrollToColumn(ids[ids.length - 1], true);
     } else if (startIdx === ids.length - 1 && deltaX < -SWIPE_WRAP_THRESHOLD) {
       swipeStartColIndex = null;
-      scrollToColumn(ids[0]);
+      scrollToColumn(ids[0], true);
     }
   }, { passive: true });
 
