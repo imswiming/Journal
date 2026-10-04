@@ -418,6 +418,12 @@
     color: var(--muted);
     border-color: transparent;
   }
+  #mark-read-today {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-size: 0.85rem;
+  }
   /* Anchored to the bottom of the screen rather than floating next to the
      selection - the browser's own Copy/Share callout already claims that
      spot on mobile, so following it there would just fight for the space. */
@@ -554,9 +560,39 @@
     line-height: 1.45;
     white-space: pre-wrap;
   }
-  #comments-empty {
+  #comments-empty, #activity-empty {
     color: var(--muted);
     font-size: 0.9rem;
+  }
+  .activity-date-heading {
+    font-family: "Figtree", sans-serif;
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin: 1.1rem 0 0.5rem;
+  }
+  .activity-date-heading:first-child { margin-top: 0; }
+  .activity-entry {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.6rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+  .activity-entry .activity-ref {
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .activity-entry .activity-time {
+    float: right;
+    color: var(--muted);
+    font-size: 0.75rem;
   }
 </style>
 </head>
@@ -652,6 +688,8 @@
     <div class="comment-actions">
       <button id="comment-remove" type="button">Remove comment</button>
       <button id="highlight-remove" type="button">Remove highlight</button>
+      <span class="nav-spacer"></span>
+      <button id="mark-read-today" type="button">I read this today</button>
     </div>
   </div>
 </div>
@@ -744,6 +782,7 @@
     }
     initReader();
     renderCommentsColumn();
+    renderActivityColumn();
   }
 
   dataFile.addEventListener("change", function () {
@@ -1400,16 +1439,41 @@
   var commentInput = document.getElementById("comment-input");
   var commentRemoveBtn = document.getElementById("comment-remove");
   var highlightRemoveBtn = document.getElementById("highlight-remove");
+  var markReadTodayBtn = document.getElementById("mark-read-today");
   var activeCommentMark = null;
+  var commentOriginalValue = "";
+
+  function findMarkVerseRef(mark) {
+    var section = mark.closest(".chapter-section");
+    if (!section) return null;
+    var flow = section.querySelector(".verse-flow");
+    var verse = null;
+    var walker = document.createTreeWalker(flow, NodeFilter.SHOW_ALL, null);
+    var node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeType === 1 && node.classList.contains("verse-num")) {
+        verse = node.textContent;
+      }
+      if (node === mark || (node.nodeType === 1 && node.contains(mark))) break;
+    }
+    return { book: section.dataset.book, chapter: section.dataset.chapter, verse: verse };
+  }
 
   function openCommentEditor(mark) {
     hideSelectionMenu();
     activeCommentMark = mark;
-    commentInput.value = mark.getAttribute("data-comment") || "";
+    commentOriginalValue = mark.getAttribute("data-comment") || "";
+    commentInput.value = commentOriginalValue;
     commentOverlay.style.display = "block";
   }
   function closeCommentEditor() {
-    applyComment(commentInput.value);
+    var mark = activeCommentMark;
+    var newValue = commentInput.value;
+    applyComment(newValue);
+    if (mark && newValue.trim() && newValue !== commentOriginalValue) {
+      var ref = findMarkVerseRef(mark);
+      if (ref) logActivity("comment", ref.book, ref.chapter, ref.verse);
+    }
     commentOverlay.style.display = "none";
     activeCommentMark = null;
   }
@@ -1429,6 +1493,15 @@
     if (section) saveHighlightState(section);
     renderCommentsColumn();
   }
+  markReadTodayBtn.addEventListener("click", function () {
+    if (!activeCommentMark) return;
+    var ref = findMarkVerseRef(activeCommentMark);
+    if (!ref) return;
+    logActivity("read", ref.book, ref.chapter, ref.verse);
+    var original = markReadTodayBtn.textContent;
+    markReadTodayBtn.textContent = "Logged ✓";
+    setTimeout(function () { markReadTodayBtn.textContent = original; }, 1500);
+  });
   function removeHighlightMark(mark) {
     var section = mark.closest(".chapter-section");
     var parent = mark.parentNode;
@@ -1697,6 +1770,7 @@
       hideSelectionMenu();
       return;
     }
+    var ref = findSelectionVerseRef();
     var range = sel.getRangeAt(0);
     var section = range.commonAncestorContainer;
     section = section.nodeType === 1 ? section.closest(".chapter-section") : section.parentElement.closest(".chapter-section");
@@ -1705,6 +1779,7 @@
     wrapRangeInMark(range);
     sel.removeAllRanges();
     saveHighlightState(section);
+    if (ref) logActivity("highlight", ref.book, ref.chapter, ref.verse);
   });
 
   function findVerseRange(section, verseNum) {
@@ -1735,6 +1810,7 @@
     wrapRangeInMark(range);
     window.getSelection().removeAllRanges();
     saveHighlightState(section);
+    logActivity("highlight", ref.book, ref.chapter, ref.verse);
   });
 
   textEl.addEventListener("click", function (e) {
@@ -2090,6 +2166,74 @@
       commentsLayoutScheduled = false;
       if (isDesktopColumns()) layoutCommentsDesktop();
       else layoutMobileCommentBadges();
+    });
+  }
+
+  // ============================================================
+  // Recent Activity column (desktop only)
+  // ============================================================
+  var ACTIVITY_KEY = "read:activity";
+  var ACTIVITY_MAX = 300;
+  var activityList = document.getElementById("activity-list");
+  var activityEmpty = document.getElementById("activity-empty");
+
+  var ACTIVITY_LABELS = {
+    highlight: "Highlighted",
+    comment: "Commented on",
+    read: "Read"
+  };
+
+  function loadActivity() {
+    try { return JSON.parse(localStorage.getItem(ACTIVITY_KEY) || "[]"); } catch (e) { return []; }
+  }
+
+  function logActivity(type, book, chapter, verse) {
+    var list = loadActivity();
+    list.unshift({ type: type, book: book, chapter: String(chapter), verse: verse ? String(verse) : null, date: new Date().toISOString() });
+    if (list.length > ACTIVITY_MAX) list.length = ACTIVITY_MAX;
+    localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list));
+    renderActivityColumn();
+  }
+
+  function renderActivityColumn() {
+    if (!activityList) return;
+    var entries = loadActivity();
+    activityEmpty.style.display = entries.length ? "none" : "block";
+    activityList.innerHTML = "";
+    var lastDateHeading = null;
+    entries.forEach(function (entry) {
+      var d = new Date(entry.date);
+      var dateHeading = d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+      if (dateHeading !== lastDateHeading) {
+        var heading = document.createElement("div");
+        heading.className = "activity-date-heading";
+        heading.textContent = dateHeading;
+        activityList.appendChild(heading);
+        lastDateHeading = dateHeading;
+      }
+
+      var row = document.createElement("div");
+      row.className = "activity-entry";
+
+      var time = document.createElement("span");
+      time.className = "activity-time";
+      time.textContent = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      row.appendChild(time);
+
+      var label = document.createElement("span");
+      label.textContent = (ACTIVITY_LABELS[entry.type] || entry.type) + " ";
+      row.appendChild(label);
+
+      var ref = document.createElement("span");
+      ref.className = "activity-ref";
+      ref.textContent = entry.verse ? entry.book + " " + entry.chapter + ":" + entry.verse : entry.book + " " + entry.chapter;
+      row.appendChild(ref);
+
+      row.addEventListener("click", function () {
+        goToVerseInRead(entry.book, parseInt(entry.chapter, 10), entry.verse ? parseInt(entry.verse, 10) : null);
+      });
+
+      activityList.appendChild(row);
     });
   }
 </script>
