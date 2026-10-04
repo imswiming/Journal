@@ -54,11 +54,7 @@
     color: var(--muted);
     font-size: 0.9rem;
   }
-  #data-file {
-    color: var(--ink);
-    font: inherit;
-  }
-  /* A single shared gate: nothing else is usable until the NIV file is loaded,
+  /* A single shared gate: nothing else is usable until the NIV text is loaded,
      since every column depends on it. */
   #data-gate {
     max-width: 32rem;
@@ -601,10 +597,7 @@
 <div id="data-gate">
   <h1>Bible Search &amp; Read</h1>
   <div id="data-box" class="panel data-panel">
-    <p id="data-status">Select your NIV data file (niv.json) to get started. It's remembered in this browser afterward - never uploaded anywhere.</p>
-    <div id="data-picker">
-      <input id="data-file" type="file" accept="application/json,.json">
-    </div>
+    <p id="data-status">Loading Bible text&hellip;</p>
   </div>
 </div>
 
@@ -640,7 +633,7 @@
           </div>
           <div id="bible-text"></div>
         </div>
-        <p id="bible-empty" style="display:none;">Load your NIV data file to start reading.</p>
+        <p id="bible-empty" style="display:none;">The Bible text is still loading.</p>
       </div>
     </section>
 
@@ -695,9 +688,6 @@
 </div>
 
 <script>
-  var DB_NAME = "bible-search-cache";
-  var STORE_NAME = "kv";
-  var DATA_KEY = "niv.json";
   var HIGHLIGHT_PREFIX = "highlights:";
 
   var BOOKS_IN_ORDER = [
@@ -735,85 +725,47 @@
   var nivData = null;
 
   // ============================================================
-  // Shared: IndexedDB-backed data loading (one picker for everything)
+  // Shared: fetch the bundled NIV JSON (one file per book) on load
   // ============================================================
-  var dataBox = document.getElementById("data-box");
   var dataStatus = document.getElementById("data-status");
-  var dataFile = document.getElementById("data-file");
   var dataGate = document.getElementById("data-gate");
   var appEl = document.getElementById("app");
 
-  function openDb() {
-    return new Promise(function (resolve, reject) {
-      var req = indexedDB.open(DB_NAME, 1);
-      req.onupgradeneeded = function () { req.result.createObjectStore(STORE_NAME); };
-      req.onsuccess = function () { resolve(req.result); };
-      req.onerror = function () { reject(req.error); };
-    });
-  }
-  function idbGet(key) {
-    return openDb().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction(STORE_NAME, "readonly");
-        var req = tx.objectStore(STORE_NAME).get(key);
-        req.onsuccess = function () { resolve(req.result); };
-        req.onerror = function () { reject(req.error); };
-      });
-    });
-  }
-  function idbSet(key, value) {
-    return openDb().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction(STORE_NAME, "readwrite");
-        tx.objectStore(STORE_NAME).put(value, key);
-        tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { reject(tx.error); };
-      });
-    });
-  }
+  var BIBLE_DATA_DIR = "data/Bible-niv-main/";
+  var BIBLE_FILE_OVERRIDES = { "Song of Solomon": "Song Of Solomon" };
 
   function refreshDataUI(loaded) {
     dataGate.style.display = loaded ? "none" : "block";
     appEl.style.display = loaded ? "block" : "none";
-    if (!loaded) {
-      dataStatus.textContent = "Select your NIV data file (niv.json) to get started. It's remembered in this browser afterward - never uploaded anywhere.";
-      nivData = null;
-      return;
-    }
+    if (!loaded) return;
     initReader();
     renderCommentsColumn();
     renderActivityColumn();
   }
 
-  dataFile.addEventListener("change", function () {
-    var file = dataFile.files && dataFile.files[0];
-    if (!file) return;
-    dataStatus.textContent = "Loading…";
-    var reader = new FileReader();
-    reader.onload = function () {
-      try {
-        nivData = JSON.parse(reader.result);
-      } catch (e) {
-        dataStatus.textContent = "That file didn't look like valid JSON - try again.";
-        return;
-      }
-      idbSet(DATA_KEY, reader.result).then(function () { refreshDataUI(true); });
-    };
-    reader.onerror = function () {
-      dataStatus.textContent = "Couldn't read that file - try again.";
-    };
-    reader.readAsText(file);
+  Promise.all(BOOKS_IN_ORDER.map(function (book) {
+    var fileName = BIBLE_FILE_OVERRIDES[book] || book;
+    return fetch(BIBLE_DATA_DIR + encodeURIComponent(fileName) + ".json")
+      .then(function (res) {
+        if (!res.ok) throw new Error("fetch failed for " + book + ": " + res.status);
+        return res.json();
+      })
+      .then(function (bookJson) {
+        var chapters = {};
+        bookJson.chapters.forEach(function (ch) {
+          var verses = {};
+          ch.verses.forEach(function (v) { verses[String(v.verse)] = v.text; });
+          chapters[String(ch.chapter)] = verses;
+        });
+        nivData = nivData || {};
+        nivData[book] = chapters;
+      });
+  })).then(function () {
+    refreshDataUI(true);
+  }).catch(function (err) {
+    console.error(err);
+    dataStatus.textContent = "Couldn't load the Bible text - try reloading the page.";
   });
-
-  idbGet(DATA_KEY).then(function (text) {
-    if (!text) { refreshDataUI(false); return; }
-    try {
-      nivData = JSON.parse(text);
-      refreshDataUI(true);
-    } catch (e) {
-      refreshDataUI(false);
-    }
-  }).catch(function () { refreshDataUI(false); });
 
   // ============================================================
   // Shared: cross references + verse range helpers
