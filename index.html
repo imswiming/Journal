@@ -507,6 +507,7 @@
   }
   .comment-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
     margin-top: 0.75rem;
     align-items: center;
@@ -581,6 +582,23 @@
     width: 100%;
     max-width: 24rem;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  }
+  #text-prompt-label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: var(--ink);
+    font-family: "Figtree", sans-serif;
+  }
+  #text-prompt-input {
+    width: 100%;
+    padding: 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+    font: inherit;
+    box-sizing: border-box;
   }
   .xref-box {
     max-width: 32rem;
@@ -702,6 +720,54 @@
     color: var(--muted);
     font-size: 0.75rem;
   }
+  .activity-overview-btn {
+    float: right;
+    margin-left: 0.4rem;
+    width: 1.3rem;
+    height: 1.3rem;
+    line-height: 1;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--panel);
+    color: var(--accent);
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .activity-overview-btn:hover { background: var(--bg); }
+  #notes-overview-wrap { padding: 1.25rem; }
+  .overview-date-group { padding-bottom: 1.25rem; margin-bottom: 1.25rem; }
+  .overview-date-group-bordered {
+    border-top: 1px solid var(--line);
+    padding-top: 1.25rem;
+  }
+  .overview-date-heading {
+    font-family: "Figtree", sans-serif;
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin: 0 0 0.6rem;
+  }
+  .overview-gratitude-box {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 3.5rem;
+    padding: 0.6rem;
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--highlight);
+    color: var(--ink);
+    font: inherit;
+    font-style: italic;
+    resize: vertical;
+  }
+  .overview-entry-list { margin: 0; padding-left: 1.3rem; }
+  .overview-entry-list li { margin: 0.35rem 0; line-height: 1.4; }
 </style>
 </head>
 <body>
@@ -774,6 +840,7 @@
         <div id="notes-editor-wrap" class="panel">
           <div id="notes-editor"></div>
         </div>
+        <div id="notes-overview-wrap" class="panel" style="display:none;"></div>
       </div>
     </section>
 
@@ -785,6 +852,7 @@
   <button id="selection-highlight-verse-btn" type="button">Highlight verse</button>
   <button id="view-biblehub" type="button">View on BibleHub</button>
   <button id="view-xrefs" type="button">Cross References</button>
+  <button id="selection-overview-btn" type="button">Overview</button>
 </div>
 
 <div id="xref-overlay" class="modal-overlay" style="display:none;">
@@ -803,10 +871,31 @@
     <label for="comment-input">Comment on this highlight</label>
     <textarea id="comment-input" rows="4"></textarea>
     <div class="comment-actions">
+      <button id="comment-biblehub" type="button">View on BibleHub</button>
+      <button id="comment-xrefs" type="button">Cross References</button>
+      <button id="comment-overview" type="button">Overview</button>
+    </div>
+    <div class="comment-actions">
       <button id="comment-remove" type="button">Remove comment</button>
       <button id="highlight-remove" type="button">Remove highlight</button>
       <span class="nav-spacer"></span>
       <button id="mark-read-today" type="button">I read this today</button>
+    </div>
+  </div>
+</div>
+
+<!-- A self-contained replacement for window.prompt() (see showTextPrompt) -
+     native prompt() throws rather than showing anything in some mobile
+     browser contexts (embedded webviews, standalone/PWA mode), which would
+     otherwise make the Notes tab bar's +/rename silently fail there. -->
+<div id="text-prompt-overlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <label id="text-prompt-label" for="text-prompt-input"></label>
+    <input id="text-prompt-input" type="text">
+    <div class="comment-actions">
+      <span class="nav-spacer"></span>
+      <button id="text-prompt-cancel" type="button">Cancel</button>
+      <button id="text-prompt-ok" type="button">OK</button>
     </div>
   </div>
 </div>
@@ -1804,7 +1893,18 @@
 
     if (scrollTo) {
       suppressObserver = true;
-      document.getElementById(sectionId(book, chapter)).scrollIntoView({ behavior: "auto", block: "start" });
+      var sectionEl = document.getElementById(sectionId(book, chapter));
+      var scrollTarget = sectionEl;
+      // Chapter 1's section starts right where the previous book's text left
+      // off - the book's own <h2> heading is a separate preceding sibling, not
+      // part of the section, so scrolling to the section itself would leave
+      // the heading off-screen above and land on the chapter/first verse
+      // instead. Jumping to a book should show its title.
+      if (chapterNumbers(book)[0] === chapter) {
+        var prev = sectionEl.previousElementSibling;
+        if (prev && prev.classList.contains("book-heading")) scrollTarget = prev;
+      }
+      scrollTarget.scrollIntoView({ behavior: "auto", block: "start" });
       requestAnimationFrame(function () {
         requestAnimationFrame(function () {
           suppressObserver = false;
@@ -2039,14 +2139,23 @@
     return { book: section.dataset.book, chapter: section.dataset.chapter, verse: verse };
   }
 
+  function openBibleHubForRef(ref) {
+    if (!ref) return;
+    var url = "https://biblehub.com/" + bibleHubSlug(ref.book) + "/" + ref.chapter + "-" + ref.verse + ".htm";
+    window.open(url, "_blank");
+  }
+
   var viewBibleHubBtn = document.getElementById("view-biblehub");
   viewBibleHubBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
   viewBibleHubBtn.addEventListener("click", function () {
     var ref = findSelectionVerseRef();
     hideSelectionMenu();
-    if (!ref) return;
-    var url = "https://biblehub.com/" + bibleHubSlug(ref.book) + "/" + ref.chapter + "-" + ref.verse + ".htm";
-    window.open(url, "_blank");
+    openBibleHubForRef(ref);
+  });
+
+  var commentBibleHubBtn = document.getElementById("comment-biblehub");
+  commentBibleHubBtn.addEventListener("click", function () {
+    if (activeCommentMark) openBibleHubForRef(findMarkVerseRef(activeCommentMark));
   });
 
   var xrefOverlay = document.getElementById("xref-overlay");
@@ -2099,10 +2208,7 @@
     });
   }
 
-  viewXrefsBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
-  viewXrefsBtn.addEventListener("click", function () {
-    var ref = findSelectionVerseRef();
-    hideSelectionMenu();
+  function openXrefsForRef(ref) {
     if (!ref) return;
     var abbr = FULL_TO_ABBR[ref.book];
     xrefOverlay.style.display = "flex";
@@ -2112,6 +2218,44 @@
     }).catch(function () {
       xrefList.innerHTML = '<p class="xref-empty">Couldn’t load cross reference data.</p>';
     });
+  }
+
+  viewXrefsBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+  viewXrefsBtn.addEventListener("click", function () {
+    var ref = findSelectionVerseRef();
+    hideSelectionMenu();
+    openXrefsForRef(ref);
+  });
+
+  var commentXrefsBtn = document.getElementById("comment-xrefs");
+  commentXrefsBtn.addEventListener("click", function () {
+    if (activeCommentMark) openXrefsForRef(findMarkVerseRef(activeCommentMark));
+  });
+
+  // "Overview" buttons - see addOverviewEntry (defined with the rest of the
+  // Notes column further down, but already in scope by the time these fire).
+  function formatVerseOverviewLine(ref) {
+    if (!ref) return null;
+    var text = (nivData[ref.book] && nivData[ref.book][ref.chapter] && nivData[ref.book][ref.chapter][ref.verse]) || "";
+    return ref.book + " " + ref.chapter + ":" + ref.verse + " — " + text;
+  }
+
+  var selectionOverviewBtn = document.getElementById("selection-overview-btn");
+  selectionOverviewBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+  selectionOverviewBtn.addEventListener("click", function () {
+    var ref = findSelectionVerseRef();
+    hideSelectionMenu();
+    addOverviewEntry(formatVerseOverviewLine(ref));
+  });
+
+  var commentOverviewBtn = document.getElementById("comment-overview");
+  commentOverviewBtn.addEventListener("click", function () {
+    if (!activeCommentMark) return;
+    var ref = findMarkVerseRef(activeCommentMark);
+    if (!ref) return;
+    var comment = commentInput.value.trim();
+    var line = comment ? (ref.book + " " + ref.chapter + ":" + ref.verse + ": " + comment) : formatVerseOverviewLine(ref);
+    addOverviewEntry(line);
   });
 
   xrefCloseBtn.addEventListener("click", closeXrefOverlay);
@@ -2419,6 +2563,17 @@
       ref.textContent = entry.verse ? entry.book + " " + entry.chapter + ":" + entry.verse : entry.book + " " + entry.chapter;
       row.appendChild(ref);
 
+      var overviewBtn = document.createElement("button");
+      overviewBtn.type = "button";
+      overviewBtn.className = "activity-overview-btn";
+      overviewBtn.title = "Add to Overview";
+      overviewBtn.textContent = "+";
+      overviewBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        addOverviewEntry((ACTIVITY_LABELS[entry.type] || entry.type) + " " + ref.textContent);
+      });
+      row.appendChild(overviewBtn);
+
       row.addEventListener("click", function () {
         goToVerseInRead(entry.book, parseInt(entry.chapter, 10), entry.verse ? parseInt(entry.verse, 10) : null);
       });
@@ -2426,6 +2581,40 @@
       activityList.appendChild(row);
     });
   }
+
+  // ============================================================
+  // A self-contained window.prompt() replacement - see #text-prompt-overlay.
+  // ============================================================
+  var textPromptOverlay = document.getElementById("text-prompt-overlay");
+  var textPromptLabel = document.getElementById("text-prompt-label");
+  var textPromptInput = document.getElementById("text-prompt-input");
+  var textPromptOkBtn = document.getElementById("text-prompt-ok");
+  var textPromptCancelBtn = document.getElementById("text-prompt-cancel");
+  var textPromptResolve = null;
+
+  function showTextPrompt(label, defaultValue) {
+    textPromptLabel.textContent = label;
+    textPromptInput.value = defaultValue || "";
+    textPromptOverlay.style.display = "flex";
+    textPromptInput.focus();
+    textPromptInput.select();
+    return new Promise(function (resolve) { textPromptResolve = resolve; });
+  }
+  function closeTextPrompt(value) {
+    textPromptOverlay.style.display = "none";
+    var resolve = textPromptResolve;
+    textPromptResolve = null;
+    if (resolve) resolve(value);
+  }
+  textPromptOkBtn.addEventListener("click", function () { closeTextPrompt(textPromptInput.value); });
+  textPromptCancelBtn.addEventListener("click", function () { closeTextPrompt(null); });
+  textPromptInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); closeTextPrompt(textPromptInput.value); }
+    else if (e.key === "Escape") { closeTextPrompt(null); }
+  });
+  textPromptOverlay.addEventListener("click", function (e) {
+    if (e.target === textPromptOverlay) closeTextPrompt(null);
+  });
 
   // ============================================================
   // Notes column (CKEditor 5 rich-text outline editor - ported from
@@ -2439,6 +2628,127 @@
   var NOTES_LEGACY_KEY = "notes:content"; // pre-tabs single-note blob, migrated below
   var notesEditor = null;
   var notesEditorEl = document.getElementById("notes-editor");
+
+  // ============================================================
+  // "Overview" - a special built-in Notes tab (see the selection-menu/
+  // comment-overlay/activity "Overview" buttons) for quickly collecting a
+  // verse, a highlight's comment, or an activity entry as a dated bullet,
+  // newest first. It's NOT free-form CKEditor content like the other tabs -
+  // each entry's date is set once at creation and never changes even if the
+  // text is edited later, and every date gets its own "Thank God for:"
+  // gratitude box - neither of those survive being modeled as plain rich
+  // text, so this renders its own panel (#notes-overview-wrap) instead.
+  // ============================================================
+  var OVERVIEW_TAB_NAME = "Overview";
+  var OVERVIEW_ENTRIES_KEY = "notes:overviewEntries";
+  var OVERVIEW_GRATITUDE_KEY = "notes:overviewGratitude";
+
+  function loadOverviewEntries() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(OVERVIEW_ENTRIES_KEY) || "[]");
+      return Array.isArray(saved) ? saved : [];
+    } catch (e) { return []; }
+  }
+  function loadOverviewGratitude() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(OVERVIEW_GRATITUDE_KEY) || "{}");
+      return (saved && typeof saved === "object") ? saved : {};
+    } catch (e) { return {}; }
+  }
+  var overviewEntries = loadOverviewEntries();
+  var overviewGratitude = loadOverviewGratitude();
+  function saveOverviewEntries() { localStorage.setItem(OVERVIEW_ENTRIES_KEY, JSON.stringify(overviewEntries)); }
+  function saveOverviewGratitude() { localStorage.setItem(OVERVIEW_GRATITUDE_KEY, JSON.stringify(overviewGratitude)); }
+
+  function todayDateKey() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function formatOverviewDateHeading(dateKey) {
+    var d = new Date(dateKey + "T00:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+  }
+
+  function isOverviewTab(tab) { return !!tab && (tab.isOverview || tab.name === OVERVIEW_TAB_NAME); }
+  function ensureOverviewTabExists() {
+    if (notesTabs.some(isOverviewTab)) return;
+    notesTabs.push({ id: "tab-" + Date.now(), name: OVERVIEW_TAB_NAME, isOverview: true, content: "" });
+    saveNotesTabs();
+  }
+
+  // Entries are always unshifted (newest first overall) and never
+  // reordered afterward, so consecutive same-date runs are already in the
+  // right order (newest date, newest-within-date) just by grouping them.
+  function groupOverviewEntries() {
+    var groups = [];
+    overviewEntries.forEach(function (entry) {
+      var last = groups[groups.length - 1];
+      if (last && last.date === entry.date) last.entries.push(entry);
+      else groups.push({ date: entry.date, entries: [entry] });
+    });
+    return groups;
+  }
+
+  function addOverviewEntry(text) {
+    if (!text) return;
+    var dateKey = todayDateKey();
+    if (!(dateKey in overviewGratitude)) {
+      overviewGratitude[dateKey] = "Thank God for: ";
+      saveOverviewGratitude();
+    }
+    overviewEntries.unshift({
+      id: "entry-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+      date: dateKey,
+      text: text
+    });
+    saveOverviewEntries();
+    ensureOverviewTabExists();
+    renderNotesTabBar();
+    if (getActiveNotesTab().isOverview) renderOverviewPanel();
+  }
+
+  function renderOverviewPanel() {
+    var wrap = document.getElementById("notes-overview-wrap");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    var groups = groupOverviewEntries();
+    var today = todayDateKey();
+    if (!groups.length || groups[0].date !== today) {
+      groups.unshift({ date: today, entries: [] });
+    }
+    groups.forEach(function (group, idx) {
+      var section = document.createElement("div");
+      section.className = "overview-date-group" + (idx > 0 ? " overview-date-group-bordered" : "");
+
+      var heading = document.createElement("div");
+      heading.className = "overview-date-heading";
+      heading.textContent = formatOverviewDateHeading(group.date);
+      section.appendChild(heading);
+
+      var gratitudeBox = document.createElement("textarea");
+      gratitudeBox.className = "overview-gratitude-box";
+      gratitudeBox.rows = 2;
+      gratitudeBox.value = overviewGratitude[group.date] || "Thank God for: ";
+      gratitudeBox.addEventListener("input", function () {
+        overviewGratitude[group.date] = gratitudeBox.value;
+        saveOverviewGratitude();
+      });
+      section.appendChild(gratitudeBox);
+
+      if (group.entries.length) {
+        var list = document.createElement("ul");
+        list.className = "overview-entry-list";
+        group.entries.forEach(function (entry) {
+          var li = document.createElement("li");
+          li.textContent = entry.text;
+          list.appendChild(li);
+        });
+        section.appendChild(list);
+      }
+
+      wrap.appendChild(section);
+    });
+  }
 
   function loadNotesTabs() {
     try {
@@ -2461,41 +2771,67 @@
   }
   // Flushes the editor's current content into its tab before anything (a tab
   // switch, adding/deleting a tab) replaces what the editor is showing.
+  // Overview isn't CKEditor content (see further down) so there's nothing to
+  // flush for it.
   function saveActiveNotesTabContent() {
     if (!notesEditor) return;
     var tab = getActiveNotesTab();
-    if (!tab) return;
+    if (!tab || isOverviewTab(tab)) return;
     tab.content = notesEditor.getData();
     saveNotesTabs();
   }
+  // Shows whichever of the CKEditor view or the Overview panel matches the
+  // now-active tab, and feeds it the right content. Safe to call before
+  // CKEditor has finished loading (it's lazy - see ensureNotesEditorLoaded) -
+  // the CKEditor side is just skipped until notesEditor exists, since
+  // initNotesEditor() reads getActiveNotesTab() itself once it does.
+  function showActiveNotesTabContent() {
+    var tab = getActiveNotesTab();
+    var overviewWrap = document.getElementById("notes-overview-wrap");
+    var editorWrap = document.getElementById("notes-editor-wrap");
+    var toolbar = document.getElementById("notes-toolbar");
+    if (isOverviewTab(tab)) {
+      if (editorWrap) editorWrap.style.display = "none";
+      if (toolbar) toolbar.style.display = "none";
+      if (overviewWrap) overviewWrap.style.display = "block";
+      renderOverviewPanel();
+    } else {
+      if (overviewWrap) overviewWrap.style.display = "none";
+      if (editorWrap) editorWrap.style.display = "";
+      if (toolbar) toolbar.style.display = "";
+      if (notesEditor) notesEditor.setData(tab.content || "<p></p>");
+    }
+  }
   function switchNotesTab(id) {
-    if (id === activeNotesTabId || !notesEditor) return;
+    if (id === activeNotesTabId) return;
     saveActiveNotesTabContent();
     activeNotesTabId = id;
     localStorage.setItem(NOTES_ACTIVE_TAB_KEY, id);
-    notesEditor.setData(getActiveNotesTab().content || "<p></p>");
+    showActiveNotesTabContent();
     renderNotesTabBar();
   }
   function addNotesTab() {
-    var name = prompt("Name for the new note:", "Untitled");
-    if (name === null) return;
-    saveActiveNotesTabContent();
-    var tab = { id: "tab-" + Date.now(), name: name.trim() || "Untitled", content: "<p></p>" };
-    notesTabs.push(tab);
-    activeNotesTabId = tab.id;
-    localStorage.setItem(NOTES_ACTIVE_TAB_KEY, tab.id);
-    saveNotesTabs();
-    if (notesEditor) notesEditor.setData(tab.content);
-    renderNotesTabBar();
+    showTextPrompt("Name for the new note:", "Untitled").then(function (name) {
+      if (name === null) return;
+      saveActiveNotesTabContent();
+      var tab = { id: "tab-" + Date.now(), name: name.trim() || "Untitled", content: "<p></p>" };
+      notesTabs.push(tab);
+      activeNotesTabId = tab.id;
+      localStorage.setItem(NOTES_ACTIVE_TAB_KEY, tab.id);
+      saveNotesTabs();
+      showActiveNotesTabContent();
+      renderNotesTabBar();
+    });
   }
   function renameNotesTab(id) {
     var tab = notesTabs.filter(function (t) { return t.id === id; })[0];
     if (!tab) return;
-    var name = prompt("Rename this note:", tab.name);
-    if (name === null) return;
-    tab.name = name.trim() || tab.name;
-    saveNotesTabs();
-    renderNotesTabBar();
+    showTextPrompt("Rename this note:", tab.name).then(function (name) {
+      if (name === null) return;
+      tab.name = name.trim() || tab.name;
+      saveNotesTabs();
+      renderNotesTabBar();
+    });
   }
   function deleteNotesTab(id) {
     if (notesTabs.length <= 1) return; // always keep at least one note
@@ -2506,7 +2842,7 @@
     if (activeNotesTabId === id) {
       activeNotesTabId = notesTabs[Math.max(0, idx - 1)].id;
       localStorage.setItem(NOTES_ACTIVE_TAB_KEY, activeNotesTabId);
-      if (notesEditor) notesEditor.setData(getActiveNotesTab().content || "<p></p>");
+      showActiveNotesTabContent();
     }
     renderNotesTabBar();
   }
@@ -2711,6 +3047,7 @@
 
   buildNotesToolbar();
   renderNotesTabBar();
+  showActiveNotesTabContent();
   var colNotesEl = document.getElementById("col-notes");
   if (colNotesEl) {
     // threshold 0.05 (not the default 0): at exactly scrollLeft 375 (Bible,
