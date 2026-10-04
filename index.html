@@ -2037,7 +2037,23 @@
     }
     if (tapTargetOpensCommentEditor(e.target)) return;
     var clickX = t.clientX, clickY = t.clientY;
-    requestAnimationFrame(function () { checkSelectionForMenu(clickX, clickY); });
+    requestAnimationFrame(function () {
+      // Right after a scroll, the browser's own native caret placement for a
+      // fresh tap can still be settling and lag behind this touchend firing -
+      // checkSelectionForMenu would then read a stale selection and silently
+      // no-op, needing a second tap to actually show the menu. Placing the
+      // caret ourselves from the tap's own coordinates sidesteps that race
+      // instead of trusting the browser to have already done it by now.
+      if (document.caretRangeFromPoint) {
+        var range = document.caretRangeFromPoint(clickX, clickY);
+        if (range) {
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
+      checkSelectionForMenu(clickX, clickY);
+    });
   });
 
   var selectionChangeScheduled = false;
