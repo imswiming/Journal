@@ -398,8 +398,14 @@
     color: var(--ink);
     user-select: text;
   }
+  @font-face {
+    font-family: "Orange Avenue";
+    src: url("data/orange-avenue-demo.regular.otf") format("opentype");
+    font-weight: normal;
+    font-style: normal;
+  }
   .book-heading {
-    font-family: "Figtree", sans-serif;
+    font-family: "Orange Avenue", "Figtree", sans-serif;
     font-weight: 800;
     font-size: 1.6rem;
     margin: 2.5rem 0 1rem;
@@ -422,8 +428,7 @@
   .verse-num {
     font-size: 0.7em;
     font-weight: 700;
-    color: var(--ink);
-    opacity: 0.7;
+    color: var(--accent);
     vertical-align: super;
     margin-right: 0.15em;
   }
@@ -594,7 +599,7 @@
   .xref-text .verse-num {
     font-size: 0.65em;
     vertical-align: super;
-    color: var(--muted);
+    color: var(--accent);
     margin-right: 0.1rem;
   }
   .xref-empty {
