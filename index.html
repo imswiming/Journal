@@ -1194,6 +1194,13 @@
   var tabsLastScrollY = 0;
   var tabsScrollScheduled = false;
   function updateColumnTabsVisibility(scrollTop) {
+    // Skipped while a text field has focus - this reads columnTabsEl's
+    // offsetHeight (layout-forcing) and can itself be triggered by a mobile
+    // browser auto-scrolling a newly-focused input into view, which is
+    // exactly the moment a forced layout read is most expensive (see
+    // scheduleCommentsLayout's own comment for why). Whether the tab bar
+    // hides is a much smaller loss than freezing the page while typing.
+    if (isTypingInTextField()) return;
     if (isDesktopColumns()) {
       columnTabsEl.classList.remove("tabs-hidden");
       tabsLastScrollY = scrollTop;
@@ -2377,23 +2384,15 @@
     });
   }, { passive: true });
   readColumn.addEventListener("scroll", hideSelectionMenu, { passive: true });
+  // scheduleCommentsLayout itself now skips doing anything while a text field
+  // has focus (see its own comment) - covers this scroll as well as the
+  // on-screen keyboard opening/closing (which fires "resize", since the
+  // visual viewport shrinks) and a mobile browser auto-scrolling a
+  // newly-focused input into view (which fires this "scroll" - the one
+  // originally suspected of causing the freeze turned out not to be the
+  // only path into the same expensive layout work).
   readColumn.addEventListener("scroll", function () { scheduleCommentsLayout(); }, { passive: true });
-  // Skipped while a text field has focus: on mobile, the on-screen keyboard
-  // opening/closing fires this same "resize" (the visual viewport shrinks),
-  // and layoutCommentsDesktop/layoutMobileCommentBadges force a synchronous
-  // layout read (getBoundingClientRect/offsetLeft) right as it happens. On a
-  // page this size - the whole Bible is ~1,189 content-visibility:auto
-  // sections, even the ones sitting off-screen in another pager column still
-  // have to be re-evaluated once anything forces layout after a real resize -
-  // that one synchronous read is enough to freeze the page for several
-  // seconds. Comment badge positions genuinely don't matter while the user
-  // is busy typing into a field anyway.
-  window.addEventListener("resize", function () {
-    var active = document.activeElement;
-    var isTyping = active && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable);
-    if (isTyping) return;
-    scheduleCommentsLayout();
-  });
+  window.addEventListener("resize", function () { scheduleCommentsLayout(); });
 
   var positionSaveScheduled = false;
   function saveLastPosition() {
@@ -2574,12 +2573,29 @@
   }
   window.matchMedia("(min-width: 1100px)").addEventListener("change", renderCommentsColumn);
 
+  // Shared by every scheduleCommentsLayout call site (window resize,
+  // readColumn's own scroll, the desktop/mobile breakpoint changing) - all of
+  // them can fire from a mobile browser auto-scrolling a newly-focused input
+  // into view, or the keyboard opening and shrinking the viewport, neither of
+  // which has anything to do with where comment cards/badges should sit.
+  // layoutCommentsDesktop/layoutMobileCommentBadges force a synchronous
+  // layout read (getBoundingClientRect/offsetLeft) to position them, which on
+  // a page this size - the whole Bible is ~1,189 content-visibility:auto
+  // sections - is exactly the kind of read that's expensive to do right as
+  // the viewport is unsettled, freezing the page for several seconds.
+  function isTypingInTextField() {
+    var active = document.activeElement;
+    return !!(active && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable));
+  }
+
   var commentsLayoutScheduled = false;
   function scheduleCommentsLayout() {
+    if (isTypingInTextField()) return;
     if (commentsLayoutScheduled) return;
     commentsLayoutScheduled = true;
     requestAnimationFrame(function () {
       commentsLayoutScheduled = false;
+      if (isTypingInTextField()) return;
       if (isDesktopColumns()) layoutCommentsDesktop();
       else layoutMobileCommentBadges();
     });
