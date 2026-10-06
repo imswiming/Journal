@@ -477,15 +477,15 @@
     font-family: "Orange Avenue", "Figtree", sans-serif;
     font-weight: 800;
     font-size: 1.6rem;
-    margin: 2.5rem 0 1rem;
+    margin: 0 0 1rem;
     scroll-margin-top: 5.5rem;
     text-align: center;
   }
-  .book-heading:first-child { margin-top: 0; }
   .chapter-section {
     content-visibility: auto;
     contain-intrinsic-size: 0 900px;
   }
+  .book-edge-sentinel { height: 1px; }
   .chapter-heading {
     font-family: "Figtree", sans-serif;
     font-weight: 700;
@@ -1746,6 +1746,9 @@
   var sectionObserver = null;
   var suppressObserver = false;
   var readerInited = false;
+  var currentRenderedBook = null;
+  var edgeObserver = null;
+  var edgeObserverIgnoreNext = false;
 
   var readColumn = document.getElementById("col-read");
   var reader = document.getElementById("reader");
@@ -1870,34 +1873,43 @@
     return "ch-" + book.replace(/\s+/g, "_") + "-" + chapter;
   }
 
-  function renderWholeBible() {
+  // Renders only ONE book's chapters into the Read column at a time, instead
+  // of the whole Bible (~1,189 chapters across all 66 books). Rendering the
+  // entire Bible's DOM at once is what caused a multi-second freeze on mobile
+  // the first time any text box on the page was focused (confirmed via
+  // isolation testing: the freeze reproduced with zero app JS attached to a
+  // bare textarea, and disappeared once the rendered DOM was cut down to a
+  // single book). Scrolling past the start/end of the rendered book jumps to
+  // the previous/next book via the edge sentinels below.
+  function renderBook(book) {
+    if (!nivData[book]) return;
+    currentRenderedBook = book;
     ALL_CHAPTERS = [];
-    var html = "";
-    BOOKS_IN_ORDER.forEach(function (book) {
-      if (!nivData[book]) return;
-      html += '<h2 class="book-heading">' + book + '</h2>';
-      chapterNumbers(book).forEach(function (chapter) {
-        ALL_CHAPTERS.push({ book: book, chapter: chapter });
-        var key = highlightKey(book, chapter);
-        var saved = localStorage.getItem(key);
-        html += '<section class="chapter-section" id="' + sectionId(book, chapter) + '" data-book="' + book + '" data-chapter="' + chapter + '">';
-        html += '<h3 class="chapter-heading">' + book + ' ' + chapter + '</h3>';
-        html += '<div class="verse-flow">';
-        if (saved) {
-          html += saved;
-        } else {
-          var verses = nivData[book][chapter];
-          var verseNums = Object.keys(verses).map(function (v) { return parseInt(v, 10); })
-            .sort(function (a, b) { return a - b; });
-          verseNums.forEach(function (v) {
-            html += '<sup class="verse-num">' + v + '</sup>' + verses[String(v)] + " ";
-          });
-        }
-        html += '</div></section>';
-      });
+    var html = '<div id="book-start-sentinel" class="book-edge-sentinel"></div>';
+    html += '<h2 class="book-heading">' + book + '</h2>';
+    chapterNumbers(book).forEach(function (chapter) {
+      ALL_CHAPTERS.push({ book: book, chapter: chapter });
+      var key = highlightKey(book, chapter);
+      var saved = localStorage.getItem(key);
+      html += '<section class="chapter-section" id="' + sectionId(book, chapter) + '" data-book="' + book + '" data-chapter="' + chapter + '">';
+      html += '<h3 class="chapter-heading">' + book + ' ' + chapter + '</h3>';
+      html += '<div class="verse-flow">';
+      if (saved) {
+        html += saved;
+      } else {
+        var verses = nivData[book][chapter];
+        var verseNums = Object.keys(verses).map(function (v) { return parseInt(v, 10); })
+          .sort(function (a, b) { return a - b; });
+        verseNums.forEach(function (v) {
+          html += '<sup class="verse-num">' + v + '</sup>' + verses[String(v)] + " ";
+        });
+      }
+      html += '</div></section>';
     });
+    html += '<div id="book-end-sentinel" class="book-edge-sentinel"></div>';
     textEl.innerHTML = html;
     setupObserver();
+    setupEdgeObserver();
   }
 
   function setupObserver() {
@@ -1912,6 +1924,43 @@
       });
     }, { root: readColumn, rootMargin: "-10% 0px -80% 0px" });
     document.querySelectorAll(".chapter-section").forEach(function (el) { sectionObserver.observe(el); });
+  }
+
+  // Watches the sentinels just before/after the rendered book to detect
+  // scrolling past its start/end, and swaps in the previous/next book. A
+  // freshly-observed target always delivers one initial callback reporting
+  // whatever its current intersection state already is (not a scroll event) -
+  // ignoring that first batch avoids an immediate false trigger on short
+  // one-screen books, where both sentinels can already be visible the moment
+  // they're rendered.
+  function setupEdgeObserver() {
+    if (edgeObserver) edgeObserver.disconnect();
+    edgeObserverIgnoreNext = true;
+    edgeObserver = new IntersectionObserver(function (entries) {
+      if (suppressObserver) return;
+      if (edgeObserverIgnoreNext) { edgeObserverIgnoreNext = false; return; }
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        if (entry.target.id === "book-end-sentinel") advanceToAdjacentBook(1);
+        else if (entry.target.id === "book-start-sentinel") advanceToAdjacentBook(-1);
+      });
+    }, { root: readColumn, threshold: 0 });
+    var startEl = document.getElementById("book-start-sentinel");
+    var endEl = document.getElementById("book-end-sentinel");
+    if (startEl) edgeObserver.observe(startEl);
+    if (endEl) edgeObserver.observe(endEl);
+  }
+
+  function advanceToAdjacentBook(direction) {
+    var bookIdx = BOOKS_IN_ORDER.indexOf(currentRenderedBook);
+    for (var i = bookIdx + direction; i >= 0 && i < BOOKS_IN_ORDER.length; i += direction) {
+      var book = BOOKS_IN_ORDER[i];
+      var chapters = chapterNumbers(book);
+      if (chapters.length) {
+        setCurrent(book, direction > 0 ? chapters[0] : chapters[chapters.length - 1], true);
+        return;
+      }
+    }
   }
 
   function populateBooks() {
@@ -1936,6 +1985,7 @@
   }
 
   function setCurrent(book, chapter, scrollTo) {
+    if (book !== currentRenderedBook) renderBook(book);
     var idx = ALL_CHAPTERS.findIndex(function (c) { return c.book === book && c.chapter === chapter; });
     if (idx === -1) return;
     currentIndex = idx;
@@ -2434,7 +2484,6 @@
     readerInited = true;
 
     populateBooks();
-    renderWholeBible();
 
     var urlTarget = getUrlVerseTarget();
     var lastBook = localStorage.getItem("read:lastBook");
@@ -2449,6 +2498,7 @@
     var targetVerse = (urlTarget && urlTarget.book === startBook && urlTarget.chapter === startChapter) ? urlTarget.verse
       : (!urlTarget && lastVerse) ? parseInt(lastVerse, 10) : null;
 
+    renderBook(startBook);
     populateChapterOptions(startBook);
     navHistory = [{ book: startBook, chapter: startChapter }];
     navHistoryIndex = 0;
