@@ -37,6 +37,7 @@
     --line: #c9d3de;
     --accent: #2f5fd0;
     --highlight: #fff3a0;
+    --gratitude-bg: #e2e6eb;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -47,6 +48,7 @@
       --line: #334155;
       --accent: #7ea2ff;
       --highlight: #6b5d1f;
+      --gratitude-bg: #2a3441;
     }
   }
   * { box-sizing: border-box; }
@@ -507,6 +509,14 @@
     border-radius: 2px;
     cursor: pointer;
   }
+  .verse-flash {
+    border-radius: 2px;
+    animation: verse-flash-fade 1.6s ease-out;
+  }
+  @keyframes verse-flash-fade {
+    0% { background: var(--highlight); }
+    100% { background: transparent; }
+  }
   #bible-empty { color: var(--muted); font-size: 0.9rem; }
 
   .comment-box label {
@@ -783,7 +793,7 @@
     border: 1px solid var(--line);
     border-left: 3px solid var(--accent);
     border-radius: 8px;
-    background: var(--highlight);
+    background: var(--gratitude-bg);
     color: var(--ink) !important;
     font-style: italic !important;
   }
@@ -1276,6 +1286,11 @@
   }
   var tabUpdateScheduled = false;
   columnsWrap.addEventListener("scroll", function () {
+    // A mobile browser auto-scrolling a newly-focused input into view (e.g.
+    // the Google search box) can nudge this horizontally-scrolling pager's
+    // own scroll position too, not just the vertical column underneath it -
+    // skip reacting to that so it doesn't fight with the keyboard opening.
+    if (isTypingInTextField()) return;
     if (tabUpdateScheduled) return;
     tabUpdateScheduled = true;
     requestAnimationFrame(function () {
@@ -1297,6 +1312,10 @@
   }, { passive: true });
   var scrollSettleTimer = null;
   columnsWrap.addEventListener("scroll", function () {
+    // Same reasoning as above - a keyboard-driven scroll nudge here isn't a
+    // real swipe, and forcibly snapping back to a column while the user is
+    // typing is exactly the kind of jump this guard exists to prevent.
+    if (isTypingInTextField()) return;
     clearTimeout(scrollSettleTimer);
     scrollSettleTimer = setTimeout(function () {
       if (swipeStartColIndex === null) return;
@@ -1347,6 +1366,7 @@
             function (s) { return s.textContent === String(verse); }
           );
           if (sup) sup.scrollIntoView({ block: "center" });
+          flashVerse(book, chapter, verse);
         });
       });
     }
@@ -2212,6 +2232,37 @@
     return range;
   }
 
+  // Briefly flashes a verse (same style as a permanent highlight, but fading
+  // out on its own) so a hyperlink jump (search result, cross reference,
+  // Recent Activity, Overview entry...) makes it obvious where you landed.
+  // Not saved anywhere - the wrapping span is removed again once the CSS
+  // animation finishes.
+  var verseFlashTimer = null;
+  function flashVerse(book, chapter, verse) {
+    if (!verse) return;
+    var section = document.getElementById(sectionId(book, chapter));
+    if (!section) return;
+    var range = findVerseRange(section, verse);
+    if (!range) return;
+    if (verseFlashTimer) clearTimeout(verseFlashTimer);
+    var span = document.createElement("span");
+    span.className = "verse-flash";
+    try {
+      range.surroundContents(span);
+    } catch (e) {
+      var contents = range.extractContents();
+      span.appendChild(contents);
+      range.insertNode(span);
+    }
+    verseFlashTimer = setTimeout(function () {
+      verseFlashTimer = null;
+      var parent = span.parentNode;
+      if (!parent) return;
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+    }, 1600);
+  }
+
   selectionHighlightVerseBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
   selectionHighlightVerseBtn.addEventListener("click", function () {
     var ref = findSelectionVerseRef();
@@ -2274,6 +2325,7 @@
   viewBibleHubBtn.addEventListener("click", function () {
     var ref = findSelectionVerseRef();
     hideSelectionMenu();
+    window.getSelection().removeAllRanges();
     openBibleHubForRef(ref);
   });
 
@@ -2348,6 +2400,7 @@
   viewXrefsBtn.addEventListener("click", function () {
     var ref = findSelectionVerseRef();
     hideSelectionMenu();
+    window.getSelection().removeAllRanges();
     openXrefsForRef(ref);
   });
 
@@ -2369,7 +2422,8 @@
   selectionOverviewBtn.addEventListener("click", function () {
     var ref = findSelectionVerseRef();
     hideSelectionMenu();
-    addOverviewEntry(formatVerseOverviewLine(ref));
+    window.getSelection().removeAllRanges();
+    addToActiveNote(formatVerseOverviewLine(ref));
   });
 
   var commentOverviewBtn = document.getElementById("comment-overview");
@@ -2379,7 +2433,7 @@
     if (!ref) return;
     var comment = commentInput.value.trim();
     var line = comment ? (ref.book + " " + ref.chapter + ":" + ref.verse + ": " + comment) : formatVerseOverviewLine(ref);
-    addOverviewEntry(line);
+    addToActiveNote(line);
   });
 
   xrefCloseBtn.addEventListener("click", closeXrefOverlay);
@@ -2633,9 +2687,30 @@
   // a page this size - the whole Bible is ~1,189 content-visibility:auto
   // sections - is exactly the kind of read that's expensive to do right as
   // the viewport is unsettled, freezing the page for several seconds.
+  // The Google search box (inside #col-search) sometimes shuffles focus
+  // internally (e.g. showing its own autocomplete suggestions) for a tick
+  // without document.activeElement being the <input> at that exact instant -
+  // a plain activeElement check can miss that and let a layout-forcing nudge
+  // slip through mid-keystroke, which is what caused the search column's
+  // view to jump around while typing. Focus staying anywhere inside the
+  // search column (plus a short grace period after it leaves) counts as
+  // "typing" too, not just the exact input element.
+  var searchFocusActive = false;
+  var searchFocusGraceTimer = null;
+  var colSearchForFocus = document.getElementById("col-search");
+  colSearchForFocus.addEventListener("focusin", function () {
+    searchFocusActive = true;
+    if (searchFocusGraceTimer) { clearTimeout(searchFocusGraceTimer); searchFocusGraceTimer = null; }
+  });
+  colSearchForFocus.addEventListener("focusout", function () {
+    if (searchFocusGraceTimer) clearTimeout(searchFocusGraceTimer);
+    searchFocusGraceTimer = setTimeout(function () { searchFocusActive = false; }, 500);
+  });
+
   function isTypingInTextField() {
     var active = document.activeElement;
-    return !!(active && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable));
+    if (active && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable)) return true;
+    return searchFocusActive;
   }
 
   var commentsLayoutScheduled = false;
@@ -2718,7 +2793,7 @@
       overviewBtn.textContent = "+";
       overviewBtn.addEventListener("click", function (e) {
         e.stopPropagation();
-        addOverviewEntry((ACTIVITY_LABELS[entry.type] || entry.type) + " " + ref.textContent);
+        addToActiveNote((ACTIVITY_LABELS[entry.type] || entry.type) + " " + ref.textContent);
       });
       row.appendChild(overviewBtn);
 
@@ -2811,7 +2886,7 @@
     var headingHtml = todaysHeadingHtml();
     if (tab.content.indexOf(headingHtml) === 0) return;
     var newBlock = headingHtml + GRATITUDE_HTML;
-    tab.content = tab.content ? newBlock + "<hr>" + tab.content : newBlock;
+    tab.content = tab.content ? newBlock + "<p>&nbsp;</p>" + tab.content : newBlock;
     saveNotesTabs();
   }
 
@@ -2826,16 +2901,39 @@
     return tab;
   }
 
-  function addOverviewEntry(text) {
+  // Prepends a bullet into tab.content just after `anchorIndex`, reusing an
+  // existing <ul> there if one's already present instead of starting a new
+  // list every time.
+  function insertBulletInto(tab, text, anchorIndex) {
     if (!text) return;
-    var tab = getOrCreateOverviewTab();
     var bulletHtml = "<li>" + escapeHtml(text) + "</li>";
-    var ulOpenTag = tab.content.match(/^\s*<ul[^>]*>/i);
+    var before = tab.content.slice(0, anchorIndex);
+    var after = tab.content.slice(anchorIndex);
+    var ulOpenTag = after.match(/^\s*<ul[^>]*>/i);
     tab.content = ulOpenTag
-      ? tab.content.slice(0, ulOpenTag[0].length) + bulletHtml + tab.content.slice(ulOpenTag[0].length)
-      : "<ul>" + bulletHtml + "</ul>" + tab.content;
+      ? before + after.slice(0, ulOpenTag[0].length) + bulletHtml + after.slice(ulOpenTag[0].length)
+      : before + "<ul>" + bulletHtml + "</ul>" + after;
     saveNotesTabs();
     if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
+  }
+
+  function addOverviewEntry(text) {
+    if (!text) return;
+    insertBulletInto(getOrCreateOverviewTab(), text, 0);
+  }
+
+  // "Add to Notes" (search results, cross references, comments, Recent
+  // Activity) inserts into whichever note tab is currently active, not the
+  // Overview tab - it lands right after today's date/gratitude block so it
+  // stays with today's entries rather than above the date heading.
+  function addToActiveNote(text) {
+    if (!text) return;
+    var tab = getActiveNotesTab();
+    if (!tab) return;
+    ensureTodaysDateBlock(tab);
+    var blockquoteEnd = tab.content.indexOf("</blockquote>");
+    var anchorIndex = blockquoteEnd === -1 ? 0 : blockquoteEnd + "</blockquote>".length;
+    insertBulletInto(tab, text, anchorIndex);
   }
 
   function loadNotesTabs() {
@@ -2987,6 +3085,21 @@
     notesEditor.editing.view.focus();
   }
 
+  // Used by the "Overview" toolbar button: the selected text in the active
+  // note if there is one, otherwise the text of whatever block (paragraph,
+  // list item, heading...) the caret is currently inside.
+  function getActiveNoteSelectionText() {
+    if (!notesEditor) return "";
+    var editableRoot = notesEditor.ui.getEditableElement();
+    var sel = window.getSelection();
+    if (!sel || !editableRoot || !sel.anchorNode || !editableRoot.contains(sel.anchorNode)) return "";
+    var text = sel.toString().trim();
+    if (text) return text;
+    var el = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+    var block = el && el.closest("p, li, h1, h2, h3, h4, blockquote");
+    return block ? block.textContent.trim() : "";
+  }
+
   function buildNotesToolbar() {
     var row = document.getElementById("notes-toolbar");
     // Tapping a toolbar button must not pull focus out of the text (which
@@ -3040,18 +3153,10 @@
     });
     makeBtn("⇤ Outdent", "Decrease indent", outdentNotesLine);
     makeBtn("⇥ Indent", "Increase indent", indentNotesLine);
-
-    // Unlike the formatting buttons above, this just switches tabs - it
-    // works immediately rather than waiting on CKEditor to finish loading,
-    // so it's added directly rather than through makeBtn (which disables
-    // everything it creates until the editor is ready).
-    var overviewTabBtn = document.createElement("button");
-    overviewTabBtn.className = "notes-toolbar-btn";
-    overviewTabBtn.type = "button";
-    overviewTabBtn.textContent = "Overview";
-    overviewTabBtn.title = "Jump to the Overview note";
-    overviewTabBtn.addEventListener("click", function () { switchNotesTab(getOrCreateOverviewTab().id); });
-    row.appendChild(overviewTabBtn);
+    makeBtn("Overview", "Add the selected text (or current line) to the Overview note", function () {
+      var text = getActiveNoteSelectionText();
+      if (text) addOverviewEntry(text);
+    });
   }
 
   function initNotesEditor() {
