@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test 1c: One book only + plain textarea</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #eef2f6;
+    color: #1c2a3a;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  #status {
+    padding: 0.75rem 1rem;
+    font-size: 0.85rem;
+    color: #5b6b7d;
+  }
+  #test-box-wrap {
+    padding: 0.75rem 1rem;
+    background: #fff3a0;
+  }
+  #test-box-wrap label {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 0.4rem;
+  }
+  #test-box {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.6rem;
+    font: inherit;
+    font-size: 1rem;
+  }
+  #bible-col {
+    height: calc(100dvh - 140px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 1rem 2rem;
+  }
+  #bible-text {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    max-width: 40rem;
+    margin: 0 auto;
+  }
+  .book-heading {
+    font-weight: 800;
+    font-size: 1.6rem;
+    margin: 2.5rem 0 1rem;
+    text-align: center;
+  }
+  .book-heading:first-child { margin-top: 1rem; }
+  .chapter-section {
+    content-visibility: auto;
+    contain-intrinsic-size: 0 900px;
+  }
+  .chapter-heading {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: #5b6b7d;
+    margin: 1.5rem 0 0.5rem;
+  }
+  .verse-num {
+    font-size: 0.7em;
+    font-weight: 700;
+    color: #2f5fd0;
+    vertical-align: super;
+    margin-right: 0.15em;
+  }
+</style>
+</head>
+<body>
+
+<div id="status">Loading Bible text&hellip;</div>
+
+<div id="test-box-wrap">
+  <label for="test-box">TEST: tap into this plain textarea (no other JS attached to it at all)</label>
+  <textarea id="test-box" rows="2" placeholder="Tap here and start typing - does it freeze?"></textarea>
+</div>
+
+<div id="bible-col">
+  <div id="bible-text"></div>
+</div>
+
+<script>
+  // ============================================================
+  // Step 1c - same as test-step1-read-only.html (content-visibility:auto
+  // IS present, since step 1b showed it isn't the specific trigger), but
+  // renders ONLY Psalms (the single largest book, ~150 chapters) instead of
+  // all 66 books (~1,189 chapters). If THIS does not freeze, raw total DOM
+  // size is confirmed as the cause, pointing to virtualizing the real app's
+  // Read column (only render the current book) as the fix.
+  // ============================================================
+  var statusEl = document.getElementById("status");
+  var bibleTextEl = document.getElementById("bible-text");
+
+  var BOOKS_TO_RENDER = ["Psalms"];
+  var BIBLE_DATA_DIR = "data/Bible-niv-main/";
+  var BIBLE_FILE_OVERRIDES = { "Song of Solomon": "Song Of Solomon" };
+
+  var BIBLE_DB_NAME = "bible-data-cache";
+  var BIBLE_STORE_NAME = "kv";
+  var BIBLE_CACHE_KEY = "nivData-v1";
+  var nivData = null;
+
+  function openBibleDb() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(BIBLE_DB_NAME, 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore(BIBLE_STORE_NAME); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+  function bibleDbGet(key) {
+    return openBibleDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(BIBLE_STORE_NAME, "readonly");
+        var req = tx.objectStore(BIBLE_STORE_NAME).get(key);
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+  function bibleDbSet(key, value) {
+    return openBibleDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(BIBLE_STORE_NAME, "readwrite");
+        tx.objectStore(BIBLE_STORE_NAME).put(value, key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+  function fetchBooksFromNetwork(books) {
+    return Promise.all(books.map(function (book) {
+      var fileName = BIBLE_FILE_OVERRIDES[book] || book;
+      return fetch(BIBLE_DATA_DIR + encodeURIComponent(fileName) + ".json")
+        .then(function (res) {
+          if (!res.ok) throw new Error("fetch failed for " + book + ": " + res.status);
+          return res.json();
+        })
+        .then(function (bookJson) {
+          var chapters = {};
+          bookJson.chapters.forEach(function (ch) {
+            var verses = {};
+            ch.verses.forEach(function (v) { verses[String(v.verse)] = v.text; });
+            chapters[String(ch.chapter)] = verses;
+          });
+          nivData = nivData || {};
+          nivData[book] = chapters;
+        });
+    }));
+  }
+
+  function chapterNumbers(book) {
+    var chapters = nivData && nivData[book];
+    if (!chapters) return [];
+    return Object.keys(chapters).map(function (c) { return parseInt(c, 10); })
+      .sort(function (a, b) { return a - b; });
+  }
+
+  function renderBooks(books) {
+    var html = "";
+    books.forEach(function (book) {
+      if (!nivData[book]) return;
+      html += '<h2 class="book-heading">' + book + '</h2>';
+      chapterNumbers(book).forEach(function (chapter) {
+        html += '<section class="chapter-section">';
+        html += '<h3 class="chapter-heading">' + book + ' ' + chapter + '</h3>';
+        html += '<div class="verse-flow">';
+        var verses = nivData[book][chapter];
+        var verseNums = Object.keys(verses).map(function (v) { return parseInt(v, 10); })
+          .sort(function (a, b) { return a - b; });
+        verseNums.forEach(function (v) {
+          html += '<sup class="verse-num">' + v + '</sup>' + verses[String(v)] + " ";
+        });
+        html += '</div></section>';
+      });
+    });
+    bibleTextEl.innerHTML = html;
+  }
+
+  // Try to reuse the full-Bible cache from the real app / step-1 pages first
+  // (so we're not re-fetching), but only pull the one book we need over the
+  // network if that cache doesn't exist yet.
+  bibleDbGet(BIBLE_CACHE_KEY).then(function (cached) {
+    if (cached && BOOKS_TO_RENDER.every(function (b) { return cached[b]; })) {
+      nivData = cached;
+      return;
+    }
+    return fetchBooksFromNetwork(BOOKS_TO_RENDER);
+  }).catch(function () {
+    return fetchBooksFromNetwork(BOOKS_TO_RENDER);
+  }).then(function () {
+    statusEl.textContent = "Loaded. Now tap into the yellow textarea above.";
+    renderBooks(BOOKS_TO_RENDER);
+  }).catch(function (err) {
+    console.error(err);
+    statusEl.textContent = "Failed to load: " + err.message;
+  });
+</script>
+</body>
+</html>
