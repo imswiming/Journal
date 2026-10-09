@@ -967,6 +967,20 @@
     color: var(--muted);
     font-size: 0.75rem;
   }
+  .activity-entry .activity-verse {
+    clear: both;
+    margin-top: 0.35rem;
+    color: var(--ink);
+  }
+  .activity-entry .activity-comment {
+    clear: both;
+    margin-top: 0.4rem;
+    padding-left: 0.6rem;
+    border-left: 2px solid var(--line);
+    color: var(--muted);
+    font-style: italic;
+    white-space: pre-wrap;
+  }
   .activity-overview-btn {
     float: right;
     margin-left: 0.4rem;
@@ -2100,7 +2114,7 @@
       var ref = findMarkVerseRef(mark);
       if (ref) {
         addCommentToJournal(ref, text);
-        logActivity("comment", ref.book, ref.chapter, ref.verse);
+        logActivity("comment", ref.book, ref.chapter, ref.verse, text);
       }
     }
     commentInput.value = "";
@@ -2138,7 +2152,7 @@
     if (!ref) return;
     if (text) {
       addCommentToJournal(ref, text);
-      logActivity("comment", ref.book, ref.chapter, ref.verse);
+      logActivity("comment", ref.book, ref.chapter, ref.verse, text);
     } else {
       addScriptureToJournal(formatVerseOverviewLine(ref));
     }
@@ -3127,6 +3141,32 @@
     }, 1800);
   }
 
+  // Takes focus out of whatever text field has it, which also closes a phone's
+  // on-screen keyboard.
+  function closeKeyboard() {
+    var el = document.activeElement;
+    if (el && el !== document.body && el.blur) el.blur();
+  }
+
+  // Scrolling anywhere closes the keyboard, like scrolling a page does in a
+  // normal app. Only a real finger drag counts - the keyboard opening makes
+  // the browser scroll the page by itself, and treating that as the user
+  // scrolling would close the keyboard the instant it appeared.
+  var touchScrollStart = null;
+  document.addEventListener("touchstart", function (e) {
+    var t = e.touches && e.touches[0];
+    touchScrollStart = t ? { x: t.clientX, y: t.clientY } : null;
+  }, { passive: true, capture: true });
+  document.addEventListener("touchmove", function (e) {
+    if (!touchScrollStart) return;
+    var t = e.touches && e.touches[0];
+    if (!t) return;
+    if (Math.abs(t.clientY - touchScrollStart.y) < 12 && Math.abs(t.clientX - touchScrollStart.x) < 12) return;
+    touchScrollStart = null; // once per drag
+    var el = document.activeElement;
+    if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable)) closeKeyboard();
+  }, { passive: true, capture: true });
+
   // The Google search box (inside #search-overlay) sometimes shuffles focus
   // internally (e.g. showing its own autocomplete suggestions) for a tick
   // without document.activeElement being the <input> at that exact instant -
@@ -3169,9 +3209,13 @@
     try { return JSON.parse(localStorage.getItem(ACTIVITY_KEY) || "[]"); } catch (e) { return []; }
   }
 
-  function logActivity(type, book, chapter, verse) {
+  // commentText is only for type "comment" - kept so Recent Activity can show
+  // what was written, not just that something was.
+  function logActivity(type, book, chapter, verse, commentText) {
     var list = loadActivity();
-    list.unshift({ type: type, book: book, chapter: String(chapter), verse: verse ? String(verse) : null, date: new Date().toISOString() });
+    var entry = { type: type, book: book, chapter: String(chapter), verse: verse ? String(verse) : null, date: new Date().toISOString() };
+    if (commentText) entry.comment = commentText;
+    list.unshift(entry);
     if (list.length > ACTIVITY_MAX) list.length = ACTIVITY_MAX;
     localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list));
     renderActivityColumn();
@@ -3212,16 +3256,36 @@
       ref.textContent = entry.verse ? entry.book + " " + entry.chapter + ":" + entry.verse : entry.book + " " + entry.chapter;
       row.appendChild(ref);
 
-      var overviewBtn = document.createElement("button");
-      overviewBtn.type = "button";
-      overviewBtn.className = "activity-overview-btn";
-      overviewBtn.title = "Add to Journal";
-      overviewBtn.textContent = "+";
-      overviewBtn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        addToJournal((ACTIVITY_LABELS[entry.type] || entry.type) + " " + ref.textContent);
-      });
-      row.appendChild(overviewBtn);
+      // The whole verse, and the comment written on it - not just "Read
+      // John 3:16". Entries from before comments were recorded show the verse.
+      var verseRef = entry.verse ? { book: entry.book, chapter: entry.chapter, verse: entry.verse } : null;
+      var verseText = verseRef ? lookupVerseText(verseRef) : null;
+      if (verseText) {
+        var verseEl = document.createElement("div");
+        verseEl.className = "activity-verse";
+        verseEl.textContent = verseText;
+        row.appendChild(verseEl);
+      }
+      if (entry.comment) {
+        var commentEl = document.createElement("div");
+        commentEl.className = "activity-comment";
+        commentEl.textContent = entry.comment;
+        row.appendChild(commentEl);
+      }
+
+      if (verseRef) {
+        var overviewBtn = document.createElement("button");
+        overviewBtn.type = "button";
+        overviewBtn.className = "activity-overview-btn";
+        overviewBtn.title = "Add to Journal";
+        overviewBtn.textContent = "+";
+        overviewBtn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          if (entry.comment) addCommentToJournal(verseRef, entry.comment);
+          else addScriptureToJournal(formatVerseOverviewLine(verseRef));
+        });
+        row.insertBefore(overviewBtn, row.firstChild);
+      }
 
       row.addEventListener("click", function () {
         goToVerseInRead(entry.book, parseInt(entry.chapter, 10), entry.verse ? parseInt(entry.verse, 10) : null);
@@ -3402,6 +3466,7 @@
       var li = block.children[journalCaretListItemIndex];
       if (li) {
         li.insertAdjacentElement("afterend", newLi);
+        if (!li.textContent.trim() && !li.querySelector("li")) li.remove(); // an empty bullet is replaced, not left above
         // The next add goes after this one, not back above it.
         journalCaretListItemIndex = Array.prototype.indexOf.call(block.children, newLi);
         tab.content = scratch.innerHTML;
@@ -3417,6 +3482,8 @@
     newUl.appendChild(newLi);
     if (anchor) {
       anchor.insertAdjacentElement("afterend", newUl);
+      // A blank line is replaced by the entry, not left above it.
+      if (anchor === block && anchor.tagName === "P" && !anchor.textContent.trim()) anchor.remove();
     } else {
       scratch.insertBefore(newUl, scratch.firstChild);
     }
@@ -3461,7 +3528,8 @@
   // Inserts html into the editor right after the top-level block holding the
   // caret (the whole gratitude box if the caret's inside it, otherwise the
   // paragraph or list item it's on), then puts the caret at the end of what
-  // was inserted.
+  // was inserted. If the caret is on an empty line, that line is replaced
+  // rather than left sitting above the new entry as a blank first line.
   function insertAtEditorCaret(html) {
     var editor = notesEditor;
     var model = editor.model;
@@ -3474,7 +3542,9 @@
       var insertPos = (block && block !== root)
         ? writer.createPositionAfter(block)
         : writer.createPositionAt(root, "end");
+      var emptyLine = block && block !== root && block.is("element", "paragraph") && block.childCount === 0;
       var range = model.insertContent(fragment, insertPos);
+      if (emptyLine) writer.remove(block);
       var target = range.end.nodeBefore;
       while (target && target.is("element") && !model.schema.checkChild(target, "$text") && target.childCount) {
         target = target.getChild(target.childCount - 1);
@@ -3494,15 +3564,8 @@
     });
   }
 
-  // A plain line of text (the Recent Activity "+" button, e.g. "Highlighted
-  // Romans 1:17").
-  function addToJournal(text) {
-    if (!text) return;
-    addBulletToJournal(escapeHtml(text), text);
-  }
-
-  // A verse on its own - search results, cross references, the selection
-  // menu's and highlight box's "Add to Journal".
+  // A verse on its own - search results, cross references, Recent Activity,
+  // the selection menu's and highlight box's "Add to Journal".
   function addScriptureToJournal(text) {
     if (!text) return;
     addBulletToJournal(escapeHtml(text), text);
@@ -3830,7 +3893,11 @@
       var text = getActiveNoteSelectionText();
       var ref = findReferenceInText(text);
       if (ref) {
+        // Keyboard focus must leave the editor too - the toolbar deliberately
+        // keeps it there (see buildNotesToolbar's mousedown), so without this
+        // the editor stays focused and its keyboard open over the Bible.
         goToVerseInRead(ref.book, ref.chapter, ref.verse);
+        closeKeyboard();
       } else {
         showToast("No Bible reference found in that line");
       }
