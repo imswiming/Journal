@@ -135,19 +135,11 @@
     height: 100vh;
     height: 100dvh;
     overflow-x: auto;
-    overflow-anchor: none;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
   }
   .columns-wrap::-webkit-scrollbar { display: none; }
-  /* The on-screen keyboard opening shrinks the viewport, which can make the
-     browser re-settle scroll-snap on its own right in the middle of that
-     resize - seen as the view hopping to a neighboring column for the first
-     keystroke or two before landing back where you were. Turning snapping
-     off for as long as any text field has focus (see the focusin/focusout
-     listener near isTypingInTextField) removes the thing that's re-settling. */
-  .columns-wrap.no-snap { scroll-snap-type: none; }
   .column {
     flex: 0 0 100vw;
     max-width: 100vw;
@@ -2816,27 +2808,6 @@
     if (active && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable)) return true;
     return searchFocusActive;
   }
-
-  // Scroll-snap on the horizontal swipe pager gets turned off for as long as
-  // any text field anywhere has focus (see the .no-snap CSS rule) - the
-  // on-screen keyboard opening shrinks the viewport, and with snapping on,
-  // the browser can re-settle the pager to a neighboring column right in the
-  // middle of that resize (seen as the view hopping around for the first
-  // keystroke or two before landing back where it started).
-  var pagerSnapGraceTimer = null;
-  function updatePagerSnapState() {
-    if (isTypingInTextField()) {
-      if (pagerSnapGraceTimer) { clearTimeout(pagerSnapGraceTimer); pagerSnapGraceTimer = null; }
-      columnsWrap.classList.add("no-snap");
-    } else if (!pagerSnapGraceTimer) {
-      pagerSnapGraceTimer = setTimeout(function () {
-        pagerSnapGraceTimer = null;
-        columnsWrap.classList.remove("no-snap");
-      }, 500);
-    }
-  }
-  document.addEventListener("focusin", updatePagerSnapState);
-  document.addEventListener("focusout", function () { setTimeout(updatePagerSnapState, 0); });
 
   var commentsLayoutScheduled = false;
   function scheduleCommentsLayout() {
