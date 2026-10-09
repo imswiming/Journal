@@ -1171,17 +1171,18 @@
     <h3>Sync across devices</h3>
     <div id="account-signed-out">
       <div id="account-step-email">
-        <p class="account-note">Sign in with your email to keep your notes, highlights and activity in sync on all your devices. We'll email you a one-time code &ndash; no password.</p>
+        <p class="account-note">Sign in with your email to keep your notes, highlights and activity in sync on all your devices. We'll email you a one-time sign-in link &ndash; no password.</p>
         <input id="account-email" class="account-input" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com">
         <div class="comment-actions">
           <span class="nav-spacer"></span>
           <button id="account-cancel" type="button">Cancel</button>
-          <button id="account-send" class="account-primary" type="button">Send code</button>
+          <button id="account-send" class="account-primary" type="button">Email me a link</button>
         </div>
       </div>
       <div id="account-step-code" style="display:none;">
-        <p class="account-note">Enter the code we emailed to <strong id="account-sent-to"></strong>.</p>
-        <input id="account-code" class="account-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Code from the email">
+        <p class="account-note">We emailed a sign-in link to <strong id="account-sent-to"></strong>. Open it <strong>on this device, in this browser</strong> and you'll come straight back here signed in. It can only be used once.</p>
+        <p class="account-note">If the email shows a code instead, type it here:</p>
+        <input id="account-code" class="account-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Code (only if the email has one)">
         <div class="comment-actions">
           <button id="account-back" type="button">Different email</button>
           <span class="nav-spacer"></span>
@@ -4516,15 +4517,27 @@
   function cloudInit() {
     setCloudStatus("signedOut");
     loadScriptOnce(SUPABASE_JS_URL).then(function () {
-      // Sign-in is by the code in the email only - detectSessionInUrl is off
-      // so an old emailed link can't half-sign-in from a redirect.
+      // The emailed message carries a sign-in link, which brings you back
+      // here with the session in the URL - detectSessionInUrl signs in from
+      // it (and removes it from the address bar). Supabase's built-in email
+      // can't include a typed code unless the project has its own SMTP
+      // provider with the template edited to include {{ .Token }}, so the
+      // code box below is a fallback for if that's ever set up.
       sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
       });
       sbClient.auth.onAuthStateChange(function (event, session) {
         // Deferred: Supabase warns that calling back into the client from
         // inside this callback can deadlock it.
-        setTimeout(function () { cloudHandleSession(session); }, 0);
+        setTimeout(function () {
+          var wasSignedOut = !cloudUser;
+          cloudHandleSession(session);
+          if (event === "SIGNED_IN" && wasSignedOut && cloudUser) {
+            accountPendingEmail = null;
+            closeAccountOverlay();
+            showToast("Signed in - syncing");
+          }
+        }, 0);
       });
     }).catch(function () {
       setCloudStatus("unavailable");
@@ -4608,7 +4621,10 @@
     accountSendBtn.disabled = true;
     sbClient.auth.signInWithOtp({
       email: email,
-      options: { shouldCreateUser: true }
+      // Back to whichever address the app is being used at (the live site,
+      // or localhost while developing) - both are on the project's
+      // redirect allow-list.
+      options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname }
     }).then(function (res) {
       accountSendBtn.disabled = false;
       if (res.error) {
