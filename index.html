@@ -2173,10 +2173,10 @@
     var mark = activeCommentMark;
     var text = commentInput.value.trim();
     if (mark && text) {
-      var ref = findMarkVerseRef(mark);
-      if (ref) {
-        addCommentToJournal(ref, text);
-        logActivity("comment", ref.book, ref.chapter, ref.verse, text);
+      var refs = verseRefsForMark(mark);
+      if (refs.length) {
+        addVersesToJournal(refs, text);
+        logActivity("comment", refs[0].book, refs[0].chapter, refs[0].verse, text);
       }
     }
     commentInput.value = "";
@@ -2207,17 +2207,13 @@
   // time (see closeCommentEditor).
   commentJournalBtn.addEventListener("click", function () {
     if (!activeCommentMark) return;
-    var ref = findMarkVerseRef(activeCommentMark);
+    var refs = verseRefsForMark(activeCommentMark);
     var text = commentInput.value.trim();
     commentInput.value = "";
     closeCommentEditor();
-    if (!ref) return;
-    if (text) {
-      addCommentToJournal(ref, text);
-      logActivity("comment", ref.book, ref.chapter, ref.verse, text);
-    } else {
-      addScriptureToJournal(formatVerseOverviewLine(ref));
-    }
+    if (!refs.length) return;
+    addVersesToJournal(refs, text);
+    if (text) logActivity("comment", refs[0].book, refs[0].chapter, refs[0].verse, text);
   });
   highlightRemoveBtn.addEventListener("click", function () {
     if (activeCommentMark) removeHighlightMark(activeCommentMark);
@@ -2429,8 +2425,10 @@
   // or collapse the native selection before the click handler runs - re-
   // deriving it there was occasionally landing on the wrong verse.
   var selectionMenuRef = null;
+  // Every verse the selection spans (selectionMenuRef is just the first).
+  var selectionMenuRefs = null;
 
-  function hideSelectionMenu() { selectionMenu.style.display = "none"; selectionMenuRef = null; }
+  function hideSelectionMenu() { selectionMenu.style.display = "none"; selectionMenuRef = null; selectionMenuRefs = null; }
   // Both this menu and the mobile cross references panel dock at the bottom
   // of the screen - while the panel's open, the menu sits just above it.
   function positionSelectionMenu() {
@@ -2461,6 +2459,7 @@
       return;
     }
     selectionMenuRef = ref;
+    selectionMenuRefs = sel.isCollapsed ? [ref] : verseRefsInRange(range);
     showXrefsFor(ref);
     if (sel.isCollapsed && hasCoords) {
       var flow = el.closest ? el.closest(".verse-flow") : null;
@@ -2675,8 +2674,37 @@
   function findSelectionVerseRef() {
     var sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return null;
-    var range = sel.getRangeAt(0);
-    var startNode = range.startContainer;
+    return verseRefAtNode(sel.getRangeAt(0).startContainer);
+  }
+
+  // Every verse a range touches, in reading order - the one it starts in,
+  // plus each later verse whose number it reaches (across chapters too).
+  function verseRefsInRange(range) {
+    var refs = [];
+    var seen = {};
+    function add(ref) {
+      if (!ref) return;
+      var key = ref.book + "|" + ref.chapter + "|" + ref.verse;
+      if (seen[key]) return;
+      seen[key] = true;
+      refs.push(ref);
+    }
+    add(verseRefAtNode(range.startContainer));
+    Array.prototype.forEach.call(textEl.querySelectorAll(".verse-num"), function (num) {
+      if (!range.intersectsNode(num)) return;
+      var section = num.closest(".chapter-section");
+      if (section) add({ book: section.dataset.book, chapter: section.dataset.chapter, verse: num.textContent });
+    });
+    return refs;
+  }
+  function verseRefsForMark(mark) {
+    var range = document.createRange();
+    range.selectNodeContents(mark);
+    var refs = verseRefsInRange(range);
+    return refs.length ? refs : [findMarkVerseRef(mark)].filter(Boolean);
+  }
+
+  function verseRefAtNode(startNode) {
     var startEl = startNode.nodeType === 1 ? startNode : startNode.parentElement;
     var section = startEl ? startEl.closest(".chapter-section") : null;
     var flow = section ? section.querySelector(".verse-flow") : null;
@@ -3035,10 +3063,10 @@
   var selectionOverviewBtn = document.getElementById("selection-overview-btn");
   selectionOverviewBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
   selectionOverviewBtn.addEventListener("click", function () {
-    var ref = selectionMenuRef;
+    var refs = selectionMenuRefs || [selectionMenuRef];
     hideSelectionMenu();
     window.getSelection().removeAllRanges();
-    addScriptureToJournal(formatVerseOverviewLine(ref));
+    addVersesToJournal(refs);
   });
 
   xrefCloseBtn.addEventListener("click", closeXrefOverlay);
@@ -3638,7 +3666,11 @@
 
   function addOverviewEntry(text) {
     if (!text) return;
-    insertBulletInto(getOrCreateOverviewTab(), text, 0);
+    // Several selected lines become a bullet each, in their original order
+    // (each is inserted at the top, so the last line goes in first).
+    var lines = text.split(String.fromCharCode(10)).map(function (l) { return l.trim(); }).filter(Boolean);
+    var tab = getOrCreateOverviewTab();
+    lines.reverse().forEach(function (line) { insertBulletInto(tab, line, 0); });
     showToast("Added to Overview");
   }
 
@@ -3788,12 +3820,25 @@
   // directly under the verse's.
   function addCommentToJournal(ref, commentText) {
     if (!ref || !commentText) return;
-    var verseText = lookupVerseText(ref) || "";
-    var verseLine = ref.book + " " + ref.chapter + ":" + ref.verse + (verseText ? " — " + verseText : "");
-    addBulletToJournal(
-      journalVerseMark(verseLine) + "<ul><li>" + escapeHtml(commentText) + "</li></ul>",
-      verseLine + commentText
-    );
+    addVersesToJournal([ref], commentText);
+  }
+
+  // One or more verses (a selection or highlight can span several), each its
+  // own bullet in order, with the comment - if any - indented under the last.
+  function addVersesToJournal(refs, commentText) {
+    refs = (refs || []).filter(Boolean);
+    if (!refs.length) return;
+    var lines = refs.map(function (ref) { return formatVerseOverviewLine(ref); });
+    var lastIndex = lines.length - 1;
+    function bulletInner(line, i) {
+      var inner = journalVerseMark(line);
+      if (i === lastIndex && commentText) inner += "<ul><li>" + escapeHtml(commentText) + "</li></ul>";
+      return inner;
+    }
+    var html = "<ul>" + lines.map(function (line, i) { return "<li>" + bulletInner(line, i) + "</li>"; }).join("") + "</ul>";
+    insertIntoJournal(html, lines[lastIndex] + (commentText || ""), function (tab) {
+      lines.forEach(function (line, i) { insertAtJournalCaret(tab, bulletInner(line, i)); });
+    });
   }
 
   // After an add: closes the search overlay if it was added from there, shows
