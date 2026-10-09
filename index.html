@@ -1166,7 +1166,7 @@
         </div>
       </div>
       <div id="account-step-code" style="display:none;">
-        <p class="account-note">Enter the code we emailed to <strong id="account-sent-to"></strong> &ndash; or open the link in that email on this device.</p>
+        <p class="account-note">Enter the code we emailed to <strong id="account-sent-to"></strong>.</p>
         <input id="account-code" class="account-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Code from the email">
         <div class="comment-actions">
           <button id="account-back" type="button">Different email</button>
@@ -3459,7 +3459,7 @@
   }
 
   // Inserts html into the editor right after the top-level block holding the
-  // caret (a whole quote bubble if the caret's inside one, otherwise the
+  // caret (the whole gratitude box if the caret's inside it, otherwise the
   // paragraph or list item it's on), then puts the caret at the end of what
   // was inserted.
   function insertAtEditorCaret(html) {
@@ -3485,78 +3485,40 @@
     });
   }
 
-  // "Add to Journal" for a plain line of text (currently just the Recent
-  // Activity "+" button, e.g. "Highlighted Romans 1:17") - a short activity
-  // description, not scripture, so it's a plain bullet rather than the quote
-  // bubble addScriptureToJournal/addCommentToJournal use.
+  // Every Journal entry is a plain bullet. liInnerHtml is the bullet's own
+  // (already escaped) content - for a verse with a comment, that includes a
+  // nested list holding the comment, so it sits indented underneath.
+  function addBulletToJournal(liInnerHtml, matchText) {
+    insertIntoJournal("<ul><li>" + liInnerHtml + "</li></ul>", matchText, function (tab) {
+      insertAtJournalCaret(tab, liInnerHtml);
+    });
+  }
+
+  // A plain line of text (the Recent Activity "+" button, e.g. "Highlighted
+  // Romans 1:17").
   function addToJournal(text) {
     if (!text) return;
-    insertIntoJournal("<ul><li>" + escapeHtml(text) + "</li></ul>", text, function (tab) {
-      insertAtJournalCaret(tab, escapeHtml(text));
-    });
+    addBulletToJournal(escapeHtml(text), text);
   }
 
-  // Builds a quote bubble for a verse, styled the same as the daily gratitude
-  // box - with the typed comment (if any) as a bullet underneath it, inside
-  // the same bubble.
-  function buildScriptureBubble(verseLine, commentText) {
-    var bq = document.createElement("blockquote");
-    var p = document.createElement("p");
-    p.textContent = verseLine;
-    bq.appendChild(p);
-    if (commentText) {
-      var ul = document.createElement("ul");
-      var li = document.createElement("li");
-      li.textContent = commentText;
-      ul.appendChild(li);
-      bq.appendChild(ul);
-    }
-    return bq;
-  }
-
-  // Inserts a scripture bubble right after the exact line the caret was last
-  // in (see insertAtJournalCaret) - bubbles are standalone entries, not list
-  // items, so this ignores journalCaretListItemIndex and always anchors at
-  // the top-level block, falling back to right after today's gratitude box.
-  function insertBubbleAtJournalCaret(tab, bubbleEl) {
-    var scratch = document.createElement("div");
-    scratch.innerHTML = tab.content;
-    var anchor = (journalCaretBlockIndex !== null ? scratch.children[journalCaretBlockIndex] : null)
-      || scratch.querySelector("blockquote");
-    if (anchor) {
-      anchor.insertAdjacentElement("afterend", bubbleEl);
-    } else {
-      scratch.insertBefore(bubbleEl, scratch.firstChild);
-    }
-    // The next add goes after this one, not back above it.
-    journalCaretBlockIndex = Array.prototype.indexOf.call(scratch.children, bubbleEl);
-    journalCaretListItemIndex = null;
-    tab.content = scratch.innerHTML;
-    saveNotesTabs();
-    if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
-  }
-
-  // Used by search results, cross references, and the selection menu's "Add
-  // to Journal" - a verse quote on its own, in a bubble like the gratitude box.
+  // A verse on its own - search results, cross references, the selection
+  // menu's and highlight box's "Add to Journal".
   function addScriptureToJournal(text) {
     if (!text) return;
-    var bubble = buildScriptureBubble(text, null);
-    insertIntoJournal(bubble.outerHTML, text, function (tab) {
-      insertBubbleAtJournalCaret(tab, bubble);
-    });
+    addBulletToJournal(escapeHtml(text), text);
   }
 
-  // Used when closing the verse comment box (see closeCommentEditor) - the
-  // verse goes in its own bubble, with the typed comment as a bullet
-  // underneath it inside that same bubble.
+  // A verse with a comment typed on it (see closeCommentEditor and the
+  // highlight box's Add to Journal) - the comment is an indented bullet
+  // directly under the verse's.
   function addCommentToJournal(ref, commentText) {
     if (!ref || !commentText) return;
     var verseText = lookupVerseText(ref) || "";
     var verseLine = ref.book + " " + ref.chapter + ":" + ref.verse + (verseText ? " — " + verseText : "");
-    var bubble = buildScriptureBubble(verseLine, commentText);
-    insertIntoJournal(bubble.outerHTML, verseLine + commentText, function (tab) {
-      insertBubbleAtJournalCaret(tab, bubble);
-    });
+    addBulletToJournal(
+      escapeHtml(verseLine) + "<ul><li>" + escapeHtml(commentText) + "</li></ul>",
+      verseLine + commentText
+    );
   }
 
   // After an add: closes the search overlay if it was added from there, shows
@@ -3589,7 +3551,7 @@
   }
 
   // Moves the editor's caret to the end of the last text block inside a DOM
-  // element of the editable (e.g. a just-inserted bubble's comment bullet).
+  // element of the editable (e.g. a just-inserted verse's comment bullet).
   function placeEditorCaretAtEndOf(domEl) {
     var editor = notesEditor;
     // A list's <li> isn't itself mapped to a model element (its inner
@@ -3930,9 +3892,9 @@
         // entirely - splitting the gratitude box into two instead of just
         // giving a newline within it. A soft break (Shift+Enter's own
         // command) stays inside the same block no matter what.
-        // Bullets inside a quote bubble (a scripture's comments - see
-        // buildScriptureBubble) are the exception: Enter there should add
-        // another bullet like in any other list, not a soft break.
+        // Bullets inside a quote box are the exception (e.g. in verse
+        // bubbles saved by an earlier version of Add to Journal): Enter
+        // there should add another bullet like in any other list.
         if (data.domEvent.key === "Enter" && !data.domEvent.shiftKey) {
           var pos = editor.model.document.selection.getFirstPosition();
           if (pos && pos.parent && pos.parent.hasAttribute && pos.parent.hasAttribute("listType")) return;
@@ -4487,8 +4449,10 @@
   function cloudInit() {
     setCloudStatus("signedOut");
     loadScriptOnce(SUPABASE_JS_URL).then(function () {
+      // Sign-in is by the code in the email only - detectSessionInUrl is off
+      // so an old emailed link can't half-sign-in from a redirect.
       sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
       });
       sbClient.auth.onAuthStateChange(function (event, session) {
         // Deferred: Supabase warns that calling back into the client from
@@ -4577,7 +4541,7 @@
     accountSendBtn.disabled = true;
     sbClient.auth.signInWithOtp({
       email: email,
-      options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname }
+      options: { shouldCreateUser: true }
     }).then(function (res) {
       accountSendBtn.disabled = false;
       if (res.error) {
