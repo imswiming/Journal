@@ -3471,22 +3471,119 @@
     div.textContent = s;
     return div.innerHTML;
   }
-  function todaysHeadingHtml() {
-    var heading = new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" });
-    return "<h4>" + escapeHtml(heading) + "</h4>";
+  function todaysHeadingText() {
+    return new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" });
   }
+  function todaysHeadingHtml() {
+    return "<h4>" + escapeHtml(todaysHeadingText()) + "</h4>";
+  }
+
+  // Which calendar day a date heading is for, as "year-month-day" (or null if
+  // it isn't recognisable as a date). Headings are plain text written in
+  // whatever format the device that stamped them uses - "Saturday, 10 Oct
+  // 2026", "Saturday 10 October 2026", "Saturday, October 10, 2026"... - and
+  // with the Journal synced between devices, a heading made on one has to be
+  // recognised as today's on another, or each device stamps its own on top
+  // of the other's, on every sync. So this reads the date out of the words
+  // and numbers rather than comparing text: a 4-digit year, a day, and a
+  // month given as a name (matched by its first three letters) or a number.
+  var HEADING_MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  function headingDayKey(text) {
+    var tokens = (text || "").toLowerCase().match(/[a-z]+|\d+/g) || [];
+    var year = -1, month = -1, small = [];
+    tokens.forEach(function (tok) {
+      if (/^\d+$/.test(tok)) {
+        if (tok.length === 4) year = parseInt(tok, 10);
+        else if (tok.length <= 2) small.push(parseInt(tok, 10));
+      } else if (month === -1 && tok.length >= 3) {
+        month = HEADING_MONTHS.indexOf(tok.slice(0, 3));
+      }
+    });
+    if (year === -1) return null;
+    if (month !== -1) return small.length ? year + "-" + month + "-" + small[0] : null;
+    // Month written as a number (e.g. "2026/10/10"): it's whichever of the
+    // two small numbers isn't the day - only decidable against a known date.
+    return small.length === 2 ? year + "-?-" + Math.min(small[0], small[1]) + "," + Math.max(small[0], small[1]) : null;
+  }
+  function headingIsForToday(text) {
+    var now = new Date();
+    var key = headingDayKey(text);
+    if (key === null) return false;
+    var parts = key.split("-");
+    if (parts[1] === "?") {
+      var want = [now.getMonth() + 1, now.getDate()].sort(function (a, b) { return a - b; }).join(",");
+      return parseInt(parts[0], 10) === now.getFullYear() && parts[2] === want;
+    }
+    return key === now.getFullYear() + "-" + now.getMonth() + "-" + now.getDate();
+  }
+  function hasTodaysHeading(tab) {
+    var headings = parseHtmlBody(tab.content).querySelectorAll("h4");
+    return Array.prototype.some.call(headings, function (h) {
+      return h.textContent.trim() === todaysHeadingText() || headingIsForToday(h.textContent);
+    });
+  }
+
+  // An earlier version could stamp the same day's heading + gratitude box
+  // again and again as the Journal moved between devices that format dates
+  // differently. This removes those leftover copies - only ones that are
+  // entirely empty stamps (a heading, an unwritten "Thank God for:" box, at
+  // most blank lines, and then the next heading or the end), and only when
+  // another heading for the same day remains, so nothing written is touched.
+  // Returns true if it removed anything.
+  function removeRedundantEmptyStamps(tab) {
+    var body = parseHtmlBody(tab.content);
+    var kids = Array.prototype.slice.call(body.children);
+    var blank = function (el) { return el.tagName === "P" && !el.textContent.replace(/ /g, "").trim(); };
+    var emptyGratitude = function (el) {
+      return el && el.tagName === "BLOCKQUOTE" &&
+        el.textContent.replace(/ /g, " ").replace(/\s+/g, " ").trim().toLowerCase() === "thank god for:";
+    };
+    var days = {}; // day key -> { pure: [groups of elements], other: count of headings that have real content }
+    kids.forEach(function (el, i) {
+      if (el.tagName !== "H4") return;
+      var key = headingDayKey(el.textContent);
+      if (!key) return;
+      var day = days[key] || (days[key] = { pure: [], other: 0 });
+      var group = [el];
+      var j = i + 1;
+      if (emptyGratitude(kids[j])) {
+        group.push(kids[j]);
+        j++;
+        while (kids[j] && blank(kids[j])) { group.push(kids[j]); j++; }
+        if (!kids[j] || kids[j].tagName === "H4") { day.pure.push(group); return; }
+      }
+      day.other++;
+    });
+    var removed = false;
+    Object.keys(days).forEach(function (key) {
+      var day = days[key];
+      // Keep one copy of the day: a heading with real content if there is
+      // one, otherwise the first (topmost) empty stamp.
+      day.pure.slice(day.other > 0 ? 0 : 1).forEach(function (group) {
+        group.forEach(function (el) { el.remove(); });
+        removed = true;
+      });
+    });
+    if (removed) tab.content = body.innerHTML;
+    return removed;
+  }
+
   // Stamps today's date + gratitude box at the top of the Journal tab only,
-  // unless it's already there - safe to call every time the tab is shown.
-  // Other tabs (Overview, Prayer List, any custom note) never get this.
-  // Returns true if it just stamped (i.e. tab.content changed).
+  // unless today already has one anywhere in it - safe to call every time the
+  // tab is shown. Other tabs (Overview, Prayer List, any custom note) never
+  // get this. Returns true if tab.content changed (stamped, or cleaned up).
   function ensureTodaysDateBlock(tab) {
     if (!tab || !isJournalTab(tab)) return false;
-    var headingHtml = todaysHeadingHtml();
-    if (tab.content.indexOf(headingHtml) === 0) return false;
-    var newBlock = headingHtml + GRATITUDE_HTML;
-    tab.content = tab.content ? newBlock + "<p>&nbsp;</p>" + tab.content : newBlock;
-    saveNotesTabs();
-    return true;
+    var cleaned = removeRedundantEmptyStamps(tab);
+    var changed = cleaned;
+    if (!hasTodaysHeading(tab)) {
+      var newBlock = todaysHeadingHtml() + GRATITUDE_HTML;
+      tab.content = tab.content ? newBlock + "<p>&nbsp;</p>" + tab.content : newBlock;
+      changed = true;
+    }
+    if (changed) saveNotesTabs();
+    if (cleaned) cloudMarkNoteTabDirty(tab.id); // so the cleanup reaches the other devices too
+    return changed;
   }
 
   function getOrCreateOverviewTab() {
