@@ -37,6 +37,7 @@
     --line: #c9d3de;
     --accent: #2f5fd0;
     --highlight: #fff3a0;
+    --flash: #eef2f6;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -47,6 +48,7 @@
       --line: #334155;
       --accent: #7ea2ff;
       --highlight: #6b5d1f;
+      --flash: #2b3747;
     }
   }
   * { box-sizing: border-box; }
@@ -549,7 +551,7 @@
     animation: verse-flash-grey-fade 3s linear forwards;
   }
   @keyframes verse-flash-grey-fade {
-    0%, 33.33% { background: var(--line); }
+    0%, 33.33% { background: var(--flash); }
     100% { background: transparent; }
   }
   #bible-empty { color: var(--muted); font-size: 0.9rem; }
