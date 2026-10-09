@@ -225,12 +225,22 @@
   .notes-toolbar-btn:hover { background: var(--bg); }
   .notes-toolbar-btn:disabled { opacity: 0.5; cursor: default; }
   .notes-toolbar-btn:disabled:hover { background: var(--panel); }
+  .notes-tabs-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+  }
   .notes-tab-bar {
+    flex: 1 1 auto;
+    min-width: 0;
+    position: relative;
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
-    margin-bottom: 0.6rem;
   }
+  /* Desktop shows the sync button beside the "Notes" heading instead. */
+  .sync-in-tabs { display: none; }
   .notes-tab {
     display: flex;
     align-items: center;
@@ -706,8 +716,27 @@
     font-weight: 600;
     cursor: pointer;
   }
+  .sync-btn { white-space: nowrap; }
   .sync-btn.sync-signed-out { color: var(--accent); border-color: var(--accent); }
   .sync-btn.sync-problem { color: #b45309; border-color: #f59e0b; }
+  /* Mobile Notes: no "Notes" heading (the tabs make it obvious), the sync
+     button sits at the far right of the tabs' row, and the tabs themselves
+     are one line you scroll sideways rather than wrapping onto more lines. */
+  @media (max-width: 1099px) {
+    .notes-title-row { display: none; }
+    .sync-in-tabs { display: block; }
+    .notes-tab-bar {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+      /* Hitting the end of the tabs shouldn't hand the swipe on to the
+         column pager and flick to another column. */
+      overscroll-behavior-x: contain;
+    }
+    .notes-tab-bar::-webkit-scrollbar { display: none; }
+    .notes-tab { flex: 0 0 auto; white-space: nowrap; }
+  }
   .account-box { max-width: 26rem; }
   .account-box h3 {
     margin: 0 0 0.5rem;
@@ -1097,12 +1126,18 @@
 
     <section class="column" id="col-notes">
       <div class="column-pad">
+        <!-- Desktop heading row - hidden on mobile, where the sync button
+             lives in the tabs row below instead (both are .sync-btn, so the
+             sync code updates them together). -->
         <div class="notes-title-row">
           <h1>Notes</h1>
-          <button id="sync-btn" class="sync-btn" type="button">&#9729; Sign in to sync</button>
+          <button class="sync-btn" type="button">&#9729; Sign in to sync</button>
         </div>
         <div class="notes-sticky-header">
-          <div id="notes-tab-bar" class="notes-tab-bar"></div>
+          <div class="notes-tabs-row">
+            <div id="notes-tab-bar" class="notes-tab-bar"></div>
+            <button class="sync-btn sync-in-tabs" type="button">&#9729; Sign in to sync</button>
+          </div>
           <div id="notes-toolbar" class="notes-toolbar-row"></div>
         </div>
         <div id="notes-editor-wrap" class="panel">
@@ -3837,6 +3872,9 @@
   function renderNotesTabBar() {
     var bar = document.getElementById("notes-tab-bar");
     if (!bar) return;
+    // On mobile the tabs are one sideways-scrolling line, and rebuilding it
+    // would otherwise snap it back to the start every time you tap a tab.
+    var keptScroll = bar.scrollLeft;
     bar.innerHTML = "";
     notesTabs.forEach(function (tab) {
       var isActive = tab.id === activeNotesTabId;
@@ -3875,6 +3913,17 @@
     addBtn.textContent = "+";
     addBtn.addEventListener("click", addNotesTab);
     bar.appendChild(addBtn);
+
+    // Restore where it was scrolled to, then nudge only as far as needed to
+    // keep the active tab visible (e.g. a newly added note at the far end).
+    bar.scrollLeft = keptScroll;
+    var activeTabEl = bar.querySelector(".notes-tab.active");
+    if (activeTabEl && bar.scrollWidth > bar.clientWidth) {
+      var barBox = bar.getBoundingClientRect();
+      var tabBox = activeTabEl.getBoundingClientRect();
+      if (tabBox.left < barBox.left) bar.scrollLeft -= (barBox.left - tabBox.left) + 8;
+      else if (tabBox.right > barBox.right) bar.scrollLeft += (tabBox.right - barBox.right) + 8;
+    }
   }
 
   function notesActiveListType() {
@@ -4617,7 +4666,9 @@
   }
 
   // ---------- UI ----------
-  var syncBtn = document.getElementById("sync-btn");
+  // Two copies (desktop's beside the heading, mobile's in the tabs row) - CSS
+  // shows whichever fits the layout; both are kept in step here.
+  var syncBtns = Array.prototype.slice.call(document.querySelectorAll(".sync-btn"));
   var accountOverlay = document.getElementById("account-overlay");
   var accountEmailInput = document.getElementById("account-email");
   var accountCodeInput = document.getElementById("account-code");
@@ -4636,10 +4687,11 @@
   };
   function setCloudStatus(status) {
     cloudStatus = status;
-    if (!syncBtn) return;
-    syncBtn.textContent = "☁ " + CLOUD_STATUS_LABELS[status];
-    syncBtn.classList.toggle("sync-signed-out", status === "signedOut");
-    syncBtn.classList.toggle("sync-problem", status === "offline" || status === "pending" || status === "unavailable");
+    syncBtns.forEach(function (btn) {
+      btn.textContent = "☁ " + CLOUD_STATUS_LABELS[status];
+      btn.classList.toggle("sync-signed-out", status === "signedOut");
+      btn.classList.toggle("sync-problem", status === "offline" || status === "pending" || status === "unavailable");
+    });
     if (accountOverlay.style.display !== "none") renderAccountOverlay();
   }
 
@@ -4668,12 +4720,14 @@
   }
   function closeAccountOverlay() { accountOverlay.style.display = "none"; }
 
-  syncBtn.addEventListener("click", function () {
-    if (cloudStatus === "unavailable") {
-      showToast("Couldn't reach the sync service - check your connection and reload.");
-      return;
-    }
-    openAccountOverlay();
+  syncBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (cloudStatus === "unavailable") {
+        showToast("Couldn't reach the sync service - check your connection and reload.");
+        return;
+      }
+      openAccountOverlay();
+    });
   });
   accountOverlay.addEventListener("click", function (e) { if (e.target === accountOverlay) closeAccountOverlay(); });
   document.getElementById("account-cancel").addEventListener("click", closeAccountOverlay);
