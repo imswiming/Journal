@@ -2824,37 +2824,19 @@
   // middle of that resize (seen as the view hopping around for the first
   // keystroke or two before landing back where it started).
   var pagerSnapGraceTimer = null;
-  // Turning scroll-snap off alone wasn't enough - on a real device the pager
-  // kept drifting to a neighboring column on every keystroke (not just the
-  // first couple), which points to something (most likely Google's own
-  // autocomplete widget repositioning itself against what it assumes is a
-  // normally-scrolling page) actively changing columnsWrap's scroll position
-  // while typing, not just the browser settling scroll-snap once. Rather
-  // than chase down a third-party script's exact behavior, the pager's
-  // scroll position is locked outright for as long as a text field has
-  // focus: any change to it is immediately reverted back to where it was
-  // when typing started, regardless of what caused the change.
-  var pagerLockedScrollLeft = null;
   function updatePagerSnapState() {
     if (isTypingInTextField()) {
       if (pagerSnapGraceTimer) { clearTimeout(pagerSnapGraceTimer); pagerSnapGraceTimer = null; }
       columnsWrap.classList.add("no-snap");
-      if (pagerLockedScrollLeft === null) pagerLockedScrollLeft = columnsWrap.scrollLeft;
     } else if (!pagerSnapGraceTimer) {
       pagerSnapGraceTimer = setTimeout(function () {
         pagerSnapGraceTimer = null;
-        pagerLockedScrollLeft = null;
         columnsWrap.classList.remove("no-snap");
       }, 500);
     }
   }
   document.addEventListener("focusin", updatePagerSnapState);
   document.addEventListener("focusout", function () { setTimeout(updatePagerSnapState, 0); });
-  columnsWrap.addEventListener("scroll", function () {
-    if (pagerLockedScrollLeft !== null && columnsWrap.scrollLeft !== pagerLockedScrollLeft) {
-      columnsWrap.scrollLeft = pagerLockedScrollLeft;
-    }
-  }, { passive: true });
 
   var commentsLayoutScheduled = false;
   function scheduleCommentsLayout() {
