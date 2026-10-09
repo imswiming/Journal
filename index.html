@@ -534,7 +534,7 @@
   }
   .verse-flash-grey {
     border-radius: 2px;
-    animation: verse-flash-grey-fade 1.2s ease-out;
+    animation: verse-flash-grey-fade 3s ease-out;
   }
   @keyframes verse-flash-grey-fade {
     0% { background: var(--line); }
@@ -1400,7 +1400,11 @@
   }, { passive: true });
 
   function goToVerseInRead(book, chapter, verse) {
-    scrollToColumn("col-read");
+    // Instant, not smooth - an animated scroll here can still be mid-flight
+    // when the vertical scrollIntoView below fires a couple of frames later,
+    // which on some mobile browsers (especially combined with this pager's
+    // scroll-snap) occasionally left the view not actually switched to Read.
+    scrollToColumn("col-read", true);
     navigateViaLink(book, chapter);
     if (verse) {
       requestAnimationFrame(function () {
@@ -1765,6 +1769,16 @@
             });
           }
         });
+
+        var addJournalLink = document.createElement("a");
+        addJournalLink.href = "#";
+        addJournalLink.className = "source-link";
+        addJournalLink.textContent = "Add to Journal";
+        addJournalLink.addEventListener("click", function (e) {
+          e.preventDefault();
+          addToJournal(ref.book + " " + ref.chapter + ":" + ref.verse + " — " + verseText);
+        });
+        li.appendChild(addJournalLink);
       } else {
         var a = document.createElement("a");
         a.href = item.url;
@@ -2301,7 +2315,7 @@
     if (!range) return;
     if (verseFlashTimer) clearTimeout(verseFlashTimer);
     var span = document.createElement("span");
-    span.className = flashClass || "verse-flash";
+    span.className = flashClass || "verse-flash-grey";
     try {
       range.surroundContents(span);
     } catch (e) {
@@ -2315,7 +2329,7 @@
       if (!parent) return;
       while (span.firstChild) parent.insertBefore(span.firstChild, span);
       parent.removeChild(span);
-    }, 1600);
+    }, 3000);
   }
 
   selectionHighlightVerseBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
@@ -3072,7 +3086,7 @@
 
   function focusJournalEntry(journalTabId, text) {
     switchNotesTab(journalTabId);
-    scrollToColumn("col-notes");
+    scrollToColumn("col-notes", true);
     if (!text) return;
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
