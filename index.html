@@ -1458,6 +1458,20 @@
     "1 john": "1 John", "2 john": "2 John", "3 john": "3 John", "jude": "Jude", "revelation": "Revelation"
   };
   var REF_ALIAS_KEYS = Object.keys(BOOK_ALIASES).sort(function (a, b) { return b.length - a.length; });
+  // Anywhere-in-the-string sibling of REFERENCE_PATTERN below (no ^ anchor) -
+  // used by the Notes toolbar's "find this verse" button, where the
+  // reference can appear mid-line ("Thoughts on Romans 1:17 today"), not
+  // just at the very start like a search result title.
+  var REFERENCE_PATTERN_ANYWHERE = new RegExp(
+    "\\b(" + REF_ALIAS_KEYS.map(function (k) { return k.replace(/\s+/g, "\\s+"); }).join("|") + ")\\s+(\\d{1,3}):(\\d{1,3})",
+    "i"
+  );
+  function findReferenceInText(text) {
+    var m = REFERENCE_PATTERN_ANYWHERE.exec(text || "");
+    if (!m) return null;
+    var book = BOOK_ALIASES[m[1].toLowerCase().replace(/\s+/g, " ")];
+    return { book: book, chapter: parseInt(m[2], 10), verse: parseInt(m[3], 10) };
+  }
   var REFERENCE_PATTERN = new RegExp(
     "^(" + REF_ALIAS_KEYS.map(function (k) { return k.replace(/\s+/g, "\\s+"); }).join("|") + ")\\s+(\\d{1,3}):(\\d{1,3})",
     "i"
@@ -3304,6 +3318,15 @@
     makeBtn("📌", "Add the selected text (or current line) to the Overview note", function () {
       var text = getActiveNoteSelectionText();
       if (text) addOverviewEntry(text);
+    });
+    makeBtn("📖", "Find the Bible reference in the selected text (or current line) and view it in Read", function () {
+      var text = getActiveNoteSelectionText();
+      var ref = findReferenceInText(text);
+      if (ref) {
+        goToVerseInRead(ref.book, ref.chapter, ref.verse);
+      } else {
+        showToast("No Bible reference found in that line");
+      }
     });
   }
 
