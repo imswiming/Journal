@@ -303,10 +303,13 @@
       border-right: 1px solid var(--line);
     }
     .column:last-child { border-right: none; }
-    #col-read { flex: 1.8 1 0; min-width: 28rem; }
-    #col-xrefs { flex: 1 1 0; min-width: 20rem; display: block; }
+    /* The three columns are exactly equal widths (flex 1 each), so the Bible
+       sits dead centre on the page. Their content is the same max width
+       too (see .column-pad), so it lines up the same way in each. */
+    .column { min-width: 22rem; }
+    #col-xrefs { display: block; }
     #col-activity { display: none; }
-    #col-notes { flex: 1.3 1 0; min-width: 22rem; }
+    #col-xrefs .column-pad { max-width: 40rem; }
     /* Desktop shows Notes, Read, Cross References (in that order) - Activity
        is mobile-only (see #col-activity's display:none just above), and
        Search only ever exists as the overlay. */
@@ -538,20 +541,15 @@
     border-radius: 2px;
     cursor: pointer;
   }
-  .verse-flash {
-    border-radius: 2px;
-    animation: verse-flash-fade 1.6s ease-out;
-  }
-  @keyframes verse-flash-fade {
-    0% { background: var(--highlight); }
-    100% { background: transparent; }
-  }
+  /* The one flash used everywhere - tapping a verse, landing on one from a
+     link, and landing on a new Journal entry: solid light grey for the first
+     second (1/3 of the 3s), then fading out over the remaining two. */
   .verse-flash-grey {
     border-radius: 2px;
-    animation: verse-flash-grey-fade 3s ease-out;
+    animation: verse-flash-grey-fade 3s linear forwards;
   }
   @keyframes verse-flash-grey-fade {
-    0% { background: var(--line); }
+    0%, 33.33% { background: var(--line); }
     100% { background: transparent; }
   }
   #bible-empty { color: var(--muted); font-size: 0.9rem; }
@@ -839,12 +837,46 @@
     color: var(--muted);
     font-size: 0.9rem;
   }
-  #xrefs-column-list .xref-entry-label {
-    display: block;
-    font-weight: 700;
-    margin-bottom: 0.2rem;
+  .xrefs-column-title {
+    margin: -0.5rem 0 1rem;
+    font-family: "Figtree", sans-serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--muted);
   }
-  #xrefs-column-list .result-verse { display: block; }
+  .xrefs-column-title:empty { display: none; }
+
+  /* One cross-referenced verse - shared by the mobile panel (one at a time)
+     and the desktop column (a list of them) - see buildXrefVerseCard. */
+  .xref-verse-card {
+    font-size: 0.95rem;
+    line-height: 1.45;
+    color: var(--ink);
+  }
+  .xref-verse-card .result-verse { display: block; }
+  .xref-verse-card .verse-ref {
+    font-weight: 700;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .xref-add-link {
+    display: inline-block;
+    margin-top: 0.45rem;
+    font-family: "Figtree", sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  /* In the desktop column each verse sits in its own card, like Recent
+     Activity's entries on mobile. */
+  #xrefs-column-list .xref-verse-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 0.7rem 0.85rem;
+    margin-bottom: 0.7rem;
+  }
 
   /* ---------- Mobile cross references panel ---------- */
   /* Docked at the bottom without blocking Read above it - z-index sits below
@@ -904,21 +936,7 @@
     line-height: 1.45;
     color: var(--ink);
   }
-  .xref-panel-card .result-verse { display: block; }
-  .xref-panel-card .verse-ref {
-    font-weight: 700;
-    color: var(--accent);
-    text-decoration: none;
-  }
   .xref-panel-card .xref-empty { margin: 0; padding: 0.25rem 0; }
-  .xref-panel-add {
-    display: inline-block;
-    margin-top: 0.45rem;
-    font-family: "Figtree", sans-serif;
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--accent);
-  }
   .xref-panel-step {
     flex: 0 0 auto;
     width: 2rem;
@@ -1061,6 +1079,7 @@
     <section class="column" id="col-xrefs">
       <div class="column-pad">
         <h1>Cross References</h1>
+        <p id="xrefs-column-title" class="xrefs-column-title"></p>
         <div id="xrefs-column-list"></div>
         <p id="xrefs-column-empty">Select or tap a verse in Read to see its cross references here.</p>
       </div>
@@ -2341,7 +2360,7 @@
     // only lives for a few seconds - unwrap it from what's saved, or
     // highlighting within that window would bake the flash in permanently.
     var copy = flow.cloneNode(true);
-    Array.prototype.forEach.call(copy.querySelectorAll(".verse-flash, .verse-flash-grey"), function (span) {
+    Array.prototype.forEach.call(copy.querySelectorAll(".verse-flash-grey"), function (span) {
       while (span.firstChild) span.parentNode.insertBefore(span.firstChild, span);
       span.parentNode.removeChild(span);
     });
@@ -2414,7 +2433,7 @@
       // A plain tap on a verse (not a drag-selection) briefly flashes it
       // light grey, distinct from the yellow flash used for landing on a
       // verse via a hyperlink - just enough to confirm which verse was hit.
-      flashVerse(ref.book, ref.chapter, ref.verse, "verse-flash-grey");
+      flashVerse(ref.book, ref.chapter, ref.verse);
     }
     selectionHighlightBtn.style.display = sel.isCollapsed ? "none" : "";
     selectionHighlightVerseBtn.style.display = sel.isCollapsed ? "" : "none";
@@ -2534,21 +2553,37 @@
     return range;
   }
 
-  // Briefly flashes a verse (same style as a permanent highlight, but fading
-  // out on its own) so a hyperlink jump (search result, cross reference,
-  // Recent Activity, Overview entry...) makes it obvious where you landed.
-  // Not saved anywhere - the wrapping span is removed again once the CSS
-  // animation finishes.
+  // Briefly flashes a verse light grey (solid for a second, then fading) so a
+  // tap or a hyperlink jump (search result, cross reference, Recent
+  // Activity...) makes it obvious which verse it landed on. Not saved
+  // anywhere - the wrapping span is removed again once the animation is over.
   var verseFlashTimer = null;
-  function flashVerse(book, chapter, verse, flashClass) {
+
+  // Removes whatever flash is currently showing. A new flash must start from
+  // a clean slate: if the previous one's wrapper is still there, wrapping the
+  // verse again moves that wrapper (restarting its animation, so it flashes
+  // a second time) - and its cleanup timer has been replaced, so the old
+  // wrapper would also stay in the text for good.
+  function clearVerseFlash() {
+    if (verseFlashTimer) { clearTimeout(verseFlashTimer); verseFlashTimer = null; }
+    Array.prototype.forEach.call(textEl.querySelectorAll(".verse-flash-grey"), function (span) {
+      var parent = span.parentNode;
+      if (!parent) return;
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+      parent.normalize();
+    });
+  }
+
+  function flashVerse(book, chapter, verse) {
     if (!verse) return;
+    clearVerseFlash();
     var section = document.getElementById(sectionId(book, chapter));
     if (!section) return;
     var range = findVerseRange(section, verse);
     if (!range) return;
-    if (verseFlashTimer) clearTimeout(verseFlashTimer);
     var span = document.createElement("span");
-    span.className = flashClass || "verse-flash-grey";
+    span.className = "verse-flash-grey";
     try {
       range.surroundContents(span);
     } catch (e) {
@@ -2556,13 +2591,7 @@
       span.appendChild(contents);
       range.insertNode(span);
     }
-    verseFlashTimer = setTimeout(function () {
-      verseFlashTimer = null;
-      var parent = span.parentNode;
-      if (!parent) return;
-      while (span.firstChild) parent.insertBefore(span.firstChild, span);
-      parent.removeChild(span);
-    }, 3000);
+    verseFlashTimer = setTimeout(clearVerseFlash, 3000);
   }
 
   selectionHighlightVerseBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
@@ -2659,22 +2688,69 @@
   // instead of needing the Cross References button/overlay - see where
   // checkSelectionForMenu calls this once it's determined the verse. A no-op
   // on mobile, where this column doesn't exist.
+  //
+  // Same look as the mobile panel below: each cross-referenced verse (ranges
+  // like "Dan 2:28-29" split into their individual verses) is its own card -
+  // tappable reference, the verse, and an Add to Journal link - just shown as
+  // a scrolling list here instead of one at a time.
   var xrefsColumnList = document.getElementById("xrefs-column-list");
   var xrefsColumnEmpty = document.getElementById("xrefs-column-empty");
+  var xrefsColumnTitle = document.getElementById("xrefs-column-title");
+  var xrefsColumnRef = null;
+  var xrefsColumnLoaded = false;
   function updateDesktopXrefColumn(ref) {
     if (!isDesktopColumns() || !xrefsColumnList) return;
     if (!ref) {
+      xrefsColumnRef = null;
+      xrefsColumnLoaded = false;
       xrefsColumnList.innerHTML = "";
+      xrefsColumnTitle.textContent = "";
       xrefsColumnEmpty.style.display = "block";
       return;
     }
+    // Selecting the same verse again shouldn't reload the list and throw
+    // away where you'd scrolled to in it.
+    if (xrefsColumnLoaded && sameVerseRef(ref, xrefsColumnRef)) return;
+    xrefsColumnRef = ref;
+    xrefsColumnLoaded = false;
     xrefsColumnEmpty.style.display = "none";
+    xrefsColumnTitle.textContent = ref.book + " " + ref.chapter + ":" + ref.verse;
     xrefsColumnList.innerHTML = '<p class="xref-empty">Loading…</p>';
+    document.getElementById("col-xrefs").scrollTop = 0;
     loadXrefData().then(function () {
-      renderXrefEntries(xrefsColumnList, ref);
+      if (ref !== xrefsColumnRef) return; // a different verse was picked meanwhile
+      var verses = flattenXrefVerses(ref);
+      xrefsColumnList.innerHTML = "";
+      if (!verses.length) {
+        xrefsColumnList.innerHTML = '<p class="xref-empty">No cross references found for this verse.</p>';
+      } else {
+        xrefsColumnTitle.textContent += " · " + verses.length + (verses.length === 1 ? " verse" : " verses");
+        verses.forEach(function (v) { xrefsColumnList.appendChild(buildXrefVerseCard(v)); });
+      }
+      xrefsColumnLoaded = true;
     }).catch(function () {
+      if (ref !== xrefsColumnRef) return;
       xrefsColumnList.innerHTML = '<p class="xref-empty">Couldn’t load cross reference data.</p>';
     });
+  }
+
+  // One cross-referenced verse: its tappable reference and text, with an Add
+  // to Journal link underneath. Shared by the desktop column and the mobile
+  // panel.
+  function buildXrefVerseCard(v) {
+    var card = document.createElement("div");
+    card.className = "xref-verse-card";
+    card.appendChild(buildVerseLine(v.book, v.chapter, v.verse, v.text));
+    var add = document.createElement("a");
+    add.href = "#";
+    add.className = "xref-add-link";
+    add.textContent = "Add to Journal";
+    add.addEventListener("click", function (e) {
+      e.preventDefault();
+      addScriptureToJournal(v.book + " " + v.chapter + ":" + v.verse + " — " + v.text);
+    });
+    card.appendChild(add);
+    return card;
   }
 
   // Called whenever a verse is selected/tapped in Read, or a highlight is
@@ -2767,17 +2843,7 @@
       xrefPanelCard.appendChild(p);
       return;
     }
-    var v = xrefPanelVerses[xrefPanelIndex];
-    xrefPanelCard.appendChild(buildVerseLine(v.book, v.chapter, v.verse, v.text));
-    var add = document.createElement("a");
-    add.href = "#";
-    add.className = "xref-panel-add";
-    add.textContent = "Add to Journal";
-    add.addEventListener("click", function (e) {
-      e.preventDefault();
-      addScriptureToJournal(v.book + " " + v.chapter + ":" + v.verse + " — " + v.text);
-    });
-    xrefPanelCard.appendChild(add);
+    xrefPanelCard.appendChild(buildXrefVerseCard(xrefPanelVerses[xrefPanelIndex]));
   }
 
   function stepXrefPanel(delta) {
@@ -3608,8 +3674,12 @@
         trackJournalCaretFromNode(entry);
         if (isDesktopColumns()) notesEditor.editing.view.focus();
         entry.scrollIntoView({ block: "center" });
-        entry.classList.add("verse-flash");
-        setTimeout(function () { entry.classList.remove("verse-flash"); }, 1600);
+        // Same light grey flash as verses; restarted cleanly if the same
+        // entry is flashed again before the last one finished.
+        entry.classList.remove("verse-flash-grey");
+        void entry.offsetWidth;
+        entry.classList.add("verse-flash-grey");
+        setTimeout(function () { entry.classList.remove("verse-flash-grey"); }, 3000);
       });
     });
   }
