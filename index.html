@@ -532,6 +532,14 @@
     0% { background: var(--highlight); }
     100% { background: transparent; }
   }
+  .verse-flash-grey {
+    border-radius: 2px;
+    animation: verse-flash-grey-fade 1.2s ease-out;
+  }
+  @keyframes verse-flash-grey-fade {
+    0% { background: var(--line); }
+    100% { background: transparent; }
+  }
   #bible-empty { color: var(--muted); font-size: 0.9rem; }
 
   .comment-box label {
@@ -2160,6 +2168,10 @@
         hideSelectionMenu();
         return;
       }
+      // A plain tap on a verse (not a drag-selection) briefly flashes it
+      // light grey, distinct from the yellow flash used for landing on a
+      // verse via a hyperlink - just enough to confirm which verse was hit.
+      flashVerse(ref.book, ref.chapter, ref.verse, "verse-flash-grey");
     }
     selectionHighlightBtn.style.display = sel.isCollapsed ? "none" : "";
     selectionHighlightVerseBtn.style.display = sel.isCollapsed ? "" : "none";
@@ -2281,7 +2293,7 @@
   // Not saved anywhere - the wrapping span is removed again once the CSS
   // animation finishes.
   var verseFlashTimer = null;
-  function flashVerse(book, chapter, verse) {
+  function flashVerse(book, chapter, verse, flashClass) {
     if (!verse) return;
     var section = document.getElementById(sectionId(book, chapter));
     if (!section) return;
@@ -2289,7 +2301,7 @@
     if (!range) return;
     if (verseFlashTimer) clearTimeout(verseFlashTimer);
     var span = document.createElement("span");
-    span.className = "verse-flash";
+    span.className = flashClass || "verse-flash";
     try {
       range.surroundContents(span);
     } catch (e) {
