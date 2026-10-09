@@ -593,16 +593,15 @@
     font-weight: 600;
     cursor: pointer;
   }
-  #comment-remove, #highlight-remove {
-    background: transparent;
-    color: var(--muted);
-    border-color: transparent;
-  }
-  #mark-read-today {
+  /* Same look as the selection menu's buttons (.selection-menu button). */
+  #comment-overlay .comment-actions { justify-content: center; }
+  #comment-overlay .comment-actions button {
+    border: none;
+    border-radius: 6px;
     background: var(--accent);
-    border-color: var(--accent);
     color: #fff;
     font-size: 0.85rem;
+    white-space: nowrap;
   }
   /* Anchored to the bottom of the screen rather than floating next to the
      selection - the browser's own Copy/Share callout already claims that
@@ -774,6 +773,98 @@
     margin-bottom: 0.2rem;
   }
   #xrefs-column-list .result-verse { display: block; }
+
+  /* ---------- Mobile cross references panel ---------- */
+  /* Docked at the bottom without blocking Read above it - z-index sits below
+     the selection menu (40), which positionSelectionMenu lifts above this
+     panel while it's open, and below the highlight box/overlays (50). */
+  #xref-panel {
+    display: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 35;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+    padding: 0.6rem 0.75rem;
+    padding-bottom: max(0.6rem, env(safe-area-inset-bottom));
+    touch-action: pan-y;
+  }
+  body.xref-panel-open.on-read-column #xref-panel { display: block; }
+  body.xref-panel-open #col-read .column-pad { padding-bottom: 45vh; }
+  body.xref-panel-open #read-xref-btn {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .xref-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: "Figtree", sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .xref-panel-close {
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-size: 1.3rem;
+    line-height: 1;
+    padding: 0 0.2rem;
+    cursor: pointer;
+  }
+  .xref-panel-body {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+  }
+  .xref-panel-card {
+    flex: 1;
+    min-width: 0;
+    max-height: 28vh;
+    overflow-y: auto;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    color: var(--ink);
+  }
+  .xref-panel-card .result-verse { display: block; }
+  .xref-panel-card .verse-ref {
+    font-weight: 700;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .xref-panel-card .xref-empty { margin: 0; padding: 0.25rem 0; }
+  .xref-panel-add {
+    display: inline-block;
+    margin-top: 0.45rem;
+    font-family: "Figtree", sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .xref-panel-step {
+    flex: 0 0 auto;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 1.2rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .xref-panel-step:disabled { opacity: 0.3; cursor: default; }
+  @media (min-width: 1100px) {
+    /* Desktop has the Cross References column instead (see getColumnIds). */
+    #read-xref-btn, #xref-panel { display: none !important; }
+    body.xref-panel-open #col-read .column-pad { padding-bottom: 3rem; }
+  }
   .activity-date-heading {
     font-family: "Figtree", sans-serif;
     font-weight: 700;
@@ -869,6 +960,7 @@
             <button id="prev-chapter" class="nav-btn" type="button" title="Back">&larr;</button>
             <button id="next-chapter" class="nav-btn" type="button" title="Forward">&rarr;</button>
             <span class="nav-spacer"></span>
+            <button id="read-xref-btn" class="nav-btn" type="button" title="Cross references">&#128279;</button>
             <button id="read-search-btn" class="nav-btn" type="button" title="Search the Bible">&#128269;</button>
           </div>
           <div id="bible-text"></div>
@@ -936,6 +1028,23 @@
   <button id="selection-overview-btn" type="button">Add to Journal</button>
 </div>
 
+<!-- Mobile-only cross references panel - see openXrefPanel. Lives outside
+     #app (and so outside the swipeable column pager) so swiping across it
+     steps through verses instead of switching columns. -->
+<div id="xref-panel">
+  <div class="xref-panel-head">
+    <span id="xref-panel-title">Cross references</span>
+    <span class="nav-spacer"></span>
+    <span id="xref-panel-count"></span>
+    <button id="xref-panel-close" class="xref-panel-close" type="button" title="Close">&times;</button>
+  </div>
+  <div class="xref-panel-body">
+    <button id="xref-panel-prev" class="xref-panel-step" type="button" title="Previous">&lsaquo;</button>
+    <div id="xref-panel-card" class="xref-panel-card"></div>
+    <button id="xref-panel-next" class="xref-panel-step" type="button" title="Next">&rsaquo;</button>
+  </div>
+</div>
+
 <div id="toast" class="toast" style="display:none;"></div>
 
 <div id="xref-overlay" class="modal-overlay" style="display:none;">
@@ -954,14 +1063,11 @@
     <label for="comment-input">Comment on this highlight (added to Journal when closed)</label>
     <textarea id="comment-input" rows="4"></textarea>
     <div class="comment-actions">
-      <button id="comment-biblehub" type="button">View on BibleHub</button>
-      <button id="comment-xrefs" type="button">Cross References</button>
-    </div>
-    <div class="comment-actions">
-      <button id="comment-remove" type="button">Remove comment</button>
-      <button id="highlight-remove" type="button">Remove highlight</button>
-      <span class="nav-spacer"></span>
+      <button id="comment-journal" type="button">Add to Journal</button>
       <button id="mark-read-today" type="button">I read this today</button>
+      <button id="comment-xrefs" type="button">Cross References</button>
+      <button id="comment-biblehub" type="button">View on BibleHub</button>
+      <button id="highlight-remove" type="button">Remove highlight</button>
     </div>
   </div>
 </div>
@@ -1329,6 +1435,8 @@
     columnTabs.forEach(function (tab) {
       tab.classList.toggle("active", tab.getAttribute("data-target") === best);
     });
+    // The mobile cross references panel only shows over Read (see #xref-panel).
+    document.body.classList.toggle("on-read-column", best === "col-read");
   }
   var tabUpdateScheduled = false;
   columnsWrap.addEventListener("scroll", function () {
@@ -1837,7 +1945,7 @@
 
   var commentOverlay = document.getElementById("comment-overlay");
   var commentInput = document.getElementById("comment-input");
-  var commentRemoveBtn = document.getElementById("comment-remove");
+  var commentJournalBtn = document.getElementById("comment-journal");
   var highlightRemoveBtn = document.getElementById("highlight-remove");
   var markReadTodayBtn = document.getElementById("mark-read-today");
   var activeCommentMark = null;
@@ -1866,7 +1974,7 @@
     activeCommentMark = mark;
     commentInput.value = "";
     commentOverlay.style.display = "block";
-    updateDesktopXrefColumn(findMarkVerseRef(mark));
+    showXrefsFor(findMarkVerseRef(mark));
   }
   // Typing a comment and closing this (Escape, tapping outside, or the
   // dedicated remove button clearing the text first) adds the verse and the
@@ -1904,9 +2012,23 @@
     if (section) saveHighlightState(section);
   }
 
-  commentRemoveBtn.addEventListener("click", function () {
+  // Adds the highlighted verse to the Journal right away - with whatever's
+  // been typed in the box as a bullet under it, if anything - then closes
+  // the box. The text is cleared first so closing doesn't add it a second
+  // time (see closeCommentEditor).
+  commentJournalBtn.addEventListener("click", function () {
+    if (!activeCommentMark) return;
+    var ref = findMarkVerseRef(activeCommentMark);
+    var text = commentInput.value.trim();
     commentInput.value = "";
     closeCommentEditor();
+    if (!ref) return;
+    if (text) {
+      addCommentToJournal(ref, text);
+      logActivity("comment", ref.book, ref.chapter, ref.verse);
+    } else {
+      addScriptureToJournal(formatVerseOverviewLine(ref));
+    }
   });
   highlightRemoveBtn.addEventListener("click", function () {
     if (activeCommentMark) removeHighlightMark(activeCommentMark);
@@ -2111,7 +2233,12 @@
   var selectionMenuRef = null;
 
   function hideSelectionMenu() { selectionMenu.style.display = "none"; selectionMenuRef = null; }
-  function positionSelectionMenu() { selectionMenu.style.display = "flex"; }
+  // Both this menu and the mobile cross references panel dock at the bottom
+  // of the screen - while the panel's open, the menu sits just above it.
+  function positionSelectionMenu() {
+    selectionMenu.style.bottom = isXrefPanelOpen() ? xrefPanel.offsetHeight + "px" : "";
+    selectionMenu.style.display = "flex";
+  }
 
   function checkSelectionForMenu(clickX, clickY) {
     var hasCoords = typeof clickX === "number";
@@ -2136,7 +2263,7 @@
       return;
     }
     selectionMenuRef = ref;
-    updateDesktopXrefColumn(ref);
+    showXrefsFor(ref);
     if (sel.isCollapsed && hasCoords) {
       var flow = el.closest ? el.closest(".verse-flow") : null;
       var flowRect = flow && flow.getBoundingClientRect();
@@ -2228,6 +2355,10 @@
   document.addEventListener("mousedown", function (e) {
     if (Date.now() - lastTouchTime < 600) return;
     if (selectionMenu.contains(e.target) || textEl.contains(e.target)) return;
+    // Opening the cross references panel with a verse selected should show
+    // that verse's references - which needs the selection menu (and its
+    // captured verse, selectionMenuRef) to survive this tap.
+    if (e.target.closest && e.target.closest("#read-xref-btn")) return;
     hideSelectionMenu();
   });
 
@@ -2408,6 +2539,178 @@
       xrefsColumnList.innerHTML = '<p class="xref-empty">Couldn’t load cross reference data.</p>';
     });
   }
+
+  // Called whenever a verse is selected/tapped in Read, or a highlight is
+  // opened - feeds both the desktop column and the mobile panel.
+  function showXrefsFor(ref) {
+    updateDesktopXrefColumn(ref);
+    setXrefPanelRef(ref);
+  }
+
+  // ============================================================
+  // Mobile cross references panel - toggled from Read's nav bar, docked at
+  // the bottom while Read stays scrollable above it, showing one cross-
+  // referenced verse at a time (ranges like "Dan 2:28-29" are split into
+  // their individual verses). Swiping across the panel, or its ‹ › buttons,
+  // steps through them.
+  // ============================================================
+  var xrefPanel = document.getElementById("xref-panel");
+  var xrefPanelTitle = document.getElementById("xref-panel-title");
+  var xrefPanelCount = document.getElementById("xref-panel-count");
+  var xrefPanelCard = document.getElementById("xref-panel-card");
+  var xrefPanelPrev = document.getElementById("xref-panel-prev");
+  var xrefPanelNext = document.getElementById("xref-panel-next");
+  var xrefPanelRef = null;
+  var xrefPanelVerses = [];
+  var xrefPanelIndex = 0;
+
+  function isXrefPanelOpen() {
+    return document.body.classList.contains("xref-panel-open") && !isDesktopColumns();
+  }
+
+  function sameVerseRef(a, b) {
+    return !!a && !!b && a.book === b.book && String(a.chapter) === String(b.chapter) && String(a.verse) === String(b.verse);
+  }
+
+  function setXrefPanelRef(ref) {
+    if (!ref || sameVerseRef(ref, xrefPanelRef)) return;
+    xrefPanelRef = ref;
+    if (isXrefPanelOpen()) loadXrefPanel();
+  }
+
+  function flattenXrefVerses(ref) {
+    var abbr = FULL_TO_ABBR[ref.book];
+    var chapterEntries = xrefData[abbr] && xrefData[abbr][String(ref.chapter)];
+    var entries = (chapterEntries && chapterEntries[String(ref.verse)]) || [];
+    var seen = {};
+    var out = [];
+    entries.forEach(function (e) {
+      var sb = ABBR_TO_FULL[e[0]], eb = ABBR_TO_FULL[e[3]];
+      if (!sb || !eb) return;
+      collectRangeVerses(sb, e[1], e[2], eb, e[4], e[5]).forEach(function (v) {
+        var key = v.book + " " + v.chapter + ":" + v.verse;
+        if (seen[key]) return;
+        seen[key] = true;
+        out.push(v);
+      });
+    });
+    return out;
+  }
+
+  function loadXrefPanel() {
+    var ref = xrefPanelRef;
+    xrefPanelTitle.textContent = "Cross references · " + ref.book + " " + ref.chapter + ":" + ref.verse;
+    xrefPanelVerses = [];
+    xrefPanelIndex = 0;
+    renderXrefPanelCard("Loading…");
+    loadXrefData().then(function () {
+      if (ref !== xrefPanelRef) return; // a different verse was picked meanwhile
+      xrefPanelVerses = flattenXrefVerses(ref);
+      renderXrefPanelCard();
+    }).catch(function () {
+      renderXrefPanelCard("Couldn’t load cross reference data.");
+    });
+  }
+
+  function renderXrefPanelCard(message) {
+    fillXrefPanelCard(message);
+    // The card's height can change from one verse to the next.
+    if (selectionMenu.style.display !== "none") positionSelectionMenu();
+  }
+  function fillXrefPanelCard(message) {
+    var total = xrefPanelVerses.length;
+    xrefPanelCount.textContent = total ? (xrefPanelIndex + 1) + " / " + total : "";
+    xrefPanelPrev.disabled = xrefPanelIndex <= 0;
+    xrefPanelNext.disabled = xrefPanelIndex >= total - 1;
+    xrefPanelCard.innerHTML = "";
+    if (message || !total) {
+      var p = document.createElement("p");
+      p.className = "xref-empty";
+      p.textContent = message || "No cross references found for this verse.";
+      xrefPanelCard.appendChild(p);
+      return;
+    }
+    var v = xrefPanelVerses[xrefPanelIndex];
+    xrefPanelCard.appendChild(buildVerseLine(v.book, v.chapter, v.verse, v.text));
+    var add = document.createElement("a");
+    add.href = "#";
+    add.className = "xref-panel-add";
+    add.textContent = "Add to Journal";
+    add.addEventListener("click", function (e) {
+      e.preventDefault();
+      addScriptureToJournal(v.book + " " + v.chapter + ":" + v.verse + " — " + v.text);
+    });
+    xrefPanelCard.appendChild(add);
+  }
+
+  function stepXrefPanel(delta) {
+    var next = xrefPanelIndex + delta;
+    if (next < 0 || next >= xrefPanelVerses.length) return;
+    xrefPanelIndex = next;
+    renderXrefPanelCard();
+  }
+
+  // The verse currently at the top of Read - what opening the panel shows
+  // when nothing's selected. Only looks within the current chapter's own
+  // section (rather than every verse in the book) since reading a verse's
+  // position forces it to render, which content-visibility otherwise skips.
+  function topVisibleVerseRef() {
+    if (currentIndex === -1) return null;
+    var cur = ALL_CHAPTERS[currentIndex];
+    var section = document.getElementById(sectionId(cur.book, cur.chapter));
+    if (!section) return null;
+    var sups = section.querySelectorAll("sup.verse-num");
+    if (!sups.length) return null;
+    var minTop = readColumn.getBoundingClientRect().top + 80;
+    var verse = sups[sups.length - 1].textContent;
+    for (var i = 0; i < sups.length; i++) {
+      if (sups[i].getBoundingClientRect().top >= minTop) { verse = sups[i].textContent; break; }
+    }
+    return { book: cur.book, chapter: String(cur.chapter), verse: verse };
+  }
+
+  function openXrefPanel() {
+    document.body.classList.add("xref-panel-open");
+    var ref = selectionMenuRef || topVisibleVerseRef();
+    if (ref) {
+      xrefPanelRef = ref;
+      loadXrefPanel();
+    } else {
+      xrefPanelVerses = [];
+      xrefPanelTitle.textContent = "Cross references";
+      renderXrefPanelCard("Tap a verse to see its cross references.");
+    }
+  }
+  function closeXrefPanel() {
+    document.body.classList.remove("xref-panel-open");
+    if (selectionMenu.style.display !== "none") positionSelectionMenu();
+  }
+
+  document.getElementById("read-xref-btn").addEventListener("click", function () {
+    if (document.body.classList.contains("xref-panel-open")) closeXrefPanel(); else openXrefPanel();
+  });
+  document.getElementById("xref-panel-close").addEventListener("click", closeXrefPanel);
+  xrefPanelPrev.addEventListener("click", function () { stepXrefPanel(-1); });
+  xrefPanelNext.addEventListener("click", function () { stepXrefPanel(1); });
+
+  // Finger moving right-to-left shows the next verse, left-to-right the
+  // previous - same direction as moving between the pager's columns.
+  var xrefSwipeX = null, xrefSwipeY = null;
+  xrefPanel.addEventListener("touchstart", function (e) {
+    var t = e.touches && e.touches[0];
+    if (!t) return;
+    xrefSwipeX = t.clientX;
+    xrefSwipeY = t.clientY;
+  }, { passive: true });
+  xrefPanel.addEventListener("touchend", function (e) {
+    if (xrefSwipeX === null) return;
+    var t = e.changedTouches && e.changedTouches[0];
+    var dx = t ? t.clientX - xrefSwipeX : 0;
+    var dy = t ? t.clientY - xrefSwipeY : 0;
+    xrefSwipeX = null;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+    stepXrefPanel(dx < 0 ? 1 : -1);
+  }, { passive: true });
 
   function renderXrefList(ref, abbr) {
     xrefTitle.textContent = "Cross References — " + ref.book + " " + ref.chapter + ":" + ref.verse;
