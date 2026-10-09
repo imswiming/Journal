@@ -158,21 +158,21 @@
     max-width: 40rem;
     margin: 0 auto;
   }
-  #col-comments .column-pad { max-width: 28rem; }
   #col-activity .column-pad { max-width: 22rem; }
+  #col-xrefs .column-pad { max-width: 28rem; }
 
-  /* Comments isn't part of the mobile pager - its column and tab only exist
-     on the wide desktop layout below. See layoutMobileCommentBadges for the
-     mobile replacement. */
-  #col-comments, .column-tab[data-target="col-comments"], #col-activity { display: none; }
+  /* Cross References is desktop-only (see updateDesktopXrefColumn) - there's
+     no mobile equivalent, the search overlay's own "Cross references" link
+     and the selection menu's "Cross References" button cover that case. */
+  #col-xrefs { display: none; }
 
-  /* Mobile pager order (Notes, Bible, Search) via flex `order`, independent of
-     each section's actual position in the HTML - overridden back to document
-     order (Search, Read, Comments, Activity, Notes) on desktop below. Comments
-     and Activity are hidden on mobile so their order here doesn't matter. */
+  /* Mobile pager order (Notes, Bible, Activity) via flex `order`, independent
+     of each section's actual position in the HTML - overridden back to
+     document order (Read, Cross References, Activity, Notes) on desktop
+     below, where Cross References replaces this column's mobile role. */
   #col-notes { order: 1; }
   #col-read { order: 2; }
-  #col-search { order: 3; }
+  #col-activity { order: 3; }
 
   /* ---------- Notes column (CKEditor 5) ---------- */
   .notes-toolbar-row {
@@ -259,28 +259,9 @@
      swatch preview - the real background comes from this static class, reusing
      the same --highlight used for Bible verse highlights. */
   #notes-editor-wrap .ck.ck-content mark.marker-yellow { background-color: var(--highlight) !important; }
-  .mobile-comment-badge {
-    position: fixed;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    border: none;
-    background: var(--accent);
-    color: #fff;
-    font-size: 0.95rem;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    cursor: pointer;
-    z-index: 6;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
-  }
 
   @media (min-width: 1100px) {
     .column-tabs { display: none; }
-    .mobile-comment-badge { display: none; }
     .columns-wrap {
       height: 100vh;
       overflow-x: visible;
@@ -293,20 +274,16 @@
       border-right: 1px solid var(--line);
     }
     .column:last-child { border-right: none; }
-    #col-search { flex: 1 1 0; min-width: 20rem; }
     #col-read { flex: 1.8 1 0; min-width: 28rem; }
-    /* Cards are positioned to line up with their highlight's on-screen position
-       in Read, which only makes sense if this column isn't also scrolling on
-       its own. */
-    #col-comments { flex: 1 1 0; min-width: 18rem; overflow-y: hidden; display: block; }
-    #col-activity { flex: 1 1 0; min-width: 16rem; display: block; }
+    #col-xrefs { flex: 1 1 0; min-width: 20rem; display: block; }
+    #col-activity { display: none; }
     #col-notes { flex: 1.3 1 0; min-width: 22rem; }
-    /* Restore left-to-right document order on desktop (Notes is last). */
-    #col-search { order: 1; }
+    /* Desktop shows Notes, Read, Cross References (in that order) - Activity
+       is mobile-only (see #col-activity's display:none just above), and
+       Search only ever exists as the overlay. */
+    #col-notes { order: 1; }
     #col-read { order: 2; }
-    #col-comments { order: 3; }
-    #col-activity { order: 4; }
-    #col-notes { order: 5; }
+    #col-xrefs { order: 3; }
   }
 
   /* ---------- Search column ---------- */
@@ -393,6 +370,7 @@
   #results-list .source-link {
     display: inline-block;
     margin-top: 0.5rem;
+    margin-right: 1rem;
     font-size: 0.8rem;
     font-weight: 400;
     color: var(--muted);
@@ -695,6 +673,23 @@
     display: flex;
     flex-direction: column;
   }
+  .search-box-overlay {
+    max-width: 36rem;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .search-box-overlay h3 {
+    margin: 0;
+    font-family: "Figtree", sans-serif;
+    font-size: 1rem;
+    color: var(--ink);
+  }
+  .search-box-panel {
+    overflow-y: auto;
+    flex: 1;
+    margin-top: 0.75rem;
+  }
   .xref-box h3 {
     margin: 0 0 0.75rem;
     font-family: "Figtree", sans-serif;
@@ -746,36 +741,7 @@
     padding: 0.5rem 0;
   }
 
-  /* ---------- Comments column ---------- */
-  .comment-card {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--accent);
-    border-radius: 8px;
-    padding: 0.7rem 0.85rem;
-    margin-bottom: 0.75rem;
-    cursor: pointer;
-    z-index: 4;
-  }
-  .comment-card .comment-card-ref {
-    font-weight: 700;
-    color: var(--accent);
-    font-size: 0.85rem;
-    margin-bottom: 0.3rem;
-  }
-  .comment-card .comment-card-highlight {
-    color: var(--muted);
-    font-size: 0.8rem;
-    font-style: italic;
-    margin-bottom: 0.35rem;
-  }
-  .comment-card .comment-card-text {
-    color: var(--ink);
-    font-size: 0.9rem;
-    line-height: 1.45;
-    white-space: pre-wrap;
-  }
-  #comments-empty, #activity-empty {
+  #xrefs-column-empty, #activity-empty {
     color: var(--muted);
     font-size: 0.9rem;
   }
@@ -860,21 +826,9 @@
   <div class="column-tabs">
     <button class="column-tab" type="button" data-target="col-notes">Text Editor</button>
     <button class="column-tab" type="button" data-target="col-read">Bible</button>
-    <button class="column-tab" type="button" data-target="col-search">Search</button>
-    <button class="column-tab" type="button" data-target="col-comments">Comments</button>
+    <button class="column-tab" type="button" data-target="col-activity">Activity</button>
   </div>
   <div class="columns-wrap" id="columns-wrap">
-
-    <section class="column" id="col-search">
-      <div class="column-pad">
-        <h1>Search the Bible</h1>
-        <div class="panel">
-          <div class="gcse-search"></div>
-          <p id="results-status"></p>
-          <ul id="results-list"></ul>
-        </div>
-      </div>
-    </section>
 
     <section class="column" id="col-read">
       <div class="column-pad">
@@ -886,6 +840,7 @@
             <button id="prev-chapter" class="nav-btn" type="button" title="Back">&larr;</button>
             <button id="next-chapter" class="nav-btn" type="button" title="Forward">&rarr;</button>
             <span class="nav-spacer"></span>
+            <button id="read-search-btn" class="nav-btn" type="button" title="Search the Bible">&#128269;</button>
           </div>
           <div id="bible-text"></div>
         </div>
@@ -893,11 +848,14 @@
       </div>
     </section>
 
-    <section class="column" id="col-comments">
+    <!-- Desktop-only - see updateDesktopXrefColumn. Not part of the mobile
+         pager at all (hidden via CSS below), so its order here doesn't matter
+         for mobile. -->
+    <section class="column" id="col-xrefs">
       <div class="column-pad">
-        <h1>Comments</h1>
-        <div id="comments-list"></div>
-        <p id="comments-empty">No comments yet - tap a highlight in Read to add one.</p>
+        <h1>Cross References</h1>
+        <div id="xrefs-column-list"></div>
+        <p id="xrefs-column-empty">Select or tap a verse in Read to see its cross references here.</p>
       </div>
     </section>
 
@@ -920,6 +878,21 @@
       </div>
     </section>
 
+  </div>
+</div>
+
+<div id="search-overlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box search-box-overlay">
+    <div class="comment-actions">
+      <h3>Search the Bible</h3>
+      <span class="nav-spacer"></span>
+      <button id="search-overlay-close" type="button">Close</button>
+    </div>
+    <div class="panel search-box-panel">
+      <div class="gcse-search"></div>
+      <p id="results-status"></p>
+      <ul id="results-list"></ul>
+    </div>
   </div>
 </div>
 
@@ -947,12 +920,11 @@
 
 <div id="comment-overlay" style="display:none;">
   <div class="comment-box">
-    <label for="comment-input">Comment on this highlight</label>
+    <label for="comment-input">Comment on this highlight (added to Journal when closed)</label>
     <textarea id="comment-input" rows="4"></textarea>
     <div class="comment-actions">
       <button id="comment-biblehub" type="button">View on BibleHub</button>
       <button id="comment-xrefs" type="button">Cross References</button>
-      <button id="comment-overview" type="button">Add to Journal</button>
     </div>
     <div class="comment-actions">
       <button id="comment-remove" type="button">Remove comment</button>
@@ -1030,22 +1002,21 @@
     dataGate.style.display = loaded ? "none" : "block";
     appEl.style.display = loaded ? "block" : "none";
     if (!loaded) return;
-    // Search is the mobile landing page by default - set synchronously right
+    // Read is the mobile landing page by default - set synchronously right
     // as #app actually becomes visible (not via scrollIntoView, which only
     // runs on a later rAF). Doing this any earlier is a no-op: #app is
     // display:none until this point, so every column's offsetLeft reads as 0
-    // beforehand. Without this, the Notes/Bible/Search pager order (see
+    // beforehand. Without this, the Notes/Bible/Activity pager order (see
     // #col-notes's `order`) would otherwise leave Notes showing at the
     // default scrollLeft of 0 - including to the Notes column's own
     // visibility check (see ensureNotesEditorLoaded), loading it unasked for.
     // A deep link (see initReader's urlTarget) overrides this with its own
-    // later jump to Read.
+    // later jump to Read anyway, so this only matters for a plain visit.
     if (!isDesktopColumns()) {
-      var defaultLandingCol = document.getElementById("col-search");
+      var defaultLandingCol = document.getElementById("col-read");
       if (defaultLandingCol) columnsWrap.scrollLeft = defaultLandingCol.offsetLeft;
     }
     initReader();
-    renderCommentsColumn();
     renderActivityColumn();
 
     // Warms up layout once, during idle time, rather than paying for it the
@@ -1252,9 +1223,8 @@
     // Skipped while a text field has focus - this reads columnTabsEl's
     // offsetHeight (layout-forcing) and can itself be triggered by a mobile
     // browser auto-scrolling a newly-focused input into view, which is
-    // exactly the moment a forced layout read is most expensive (see
-    // scheduleCommentsLayout's own comment for why). Whether the tab bar
-    // hides is a much smaller loss than freezing the page while typing.
+    // exactly the moment a forced layout read is most expensive. Whether the
+    // tab bar hides is a much smaller loss than freezing the page while typing.
     if (isTypingInTextField()) return;
     if (isDesktopColumns()) {
       columnTabsEl.classList.remove("tabs-hidden");
@@ -1300,13 +1270,14 @@
     tab.addEventListener("click", function () { scrollToColumn(tab.getAttribute("data-target")); });
   });
 
-  // Comments isn't part of the mobile pager at all - there's a floating badge
-  // on the highlight itself there instead (see layoutMobileCommentBadges).
-  // Mobile pages through Notes/Bible/Search (in that visual order - see the
-  // #col-notes/#col-read/#col-search `order` rules); desktop shows Comments
-  // too since it's laid out as a real column there, not a floating badge.
+  // Mobile pages through Notes/Bible/Activity (in that visual order - see the
+  // #col-notes/#col-read/#col-activity `order` rules); desktop instead shows
+  // Notes/Read/Cross References side by side, with Cross References replacing
+  // Activity's role there (see updateDesktopXrefColumn). Search only ever
+  // exists as the overlay (see openSearchOverlay) - it isn't part of either
+  // layout as a column.
   function getColumnIds() {
-    return isDesktopColumns() ? ["col-search", "col-read", "col-comments"] : ["col-notes", "col-read", "col-search"];
+    return isDesktopColumns() ? ["col-notes", "col-read", "col-xrefs"] : ["col-notes", "col-read", "col-activity"];
   }
 
   function currentColumnIndex() {
@@ -1327,7 +1298,6 @@
     columnTabs.forEach(function (tab) {
       tab.classList.toggle("active", tab.getAttribute("data-target") === best);
     });
-    scheduleCommentsLayout();
   }
   var tabUpdateScheduled = false;
   columnsWrap.addEventListener("scroll", function () {
@@ -1860,7 +1830,6 @@
   var highlightRemoveBtn = document.getElementById("highlight-remove");
   var markReadTodayBtn = document.getElementById("mark-read-today");
   var activeCommentMark = null;
-  var commentOriginalValue = "";
 
   function findMarkVerseRef(mark) {
     var section = mark.closest(".chapter-section");
@@ -1878,39 +1847,33 @@
     return { book: section.dataset.book, chapter: section.dataset.chapter, verse: verse };
   }
 
+  // Commenting on a highlight no longer keeps the comment attached to it (see
+  // closeCommentEditor) - the box always starts empty, ready for a fresh
+  // one-off note rather than editing something already saved there.
   function openCommentEditor(mark) {
     hideSelectionMenu();
     activeCommentMark = mark;
-    commentOriginalValue = mark.getAttribute("data-comment") || "";
-    commentInput.value = commentOriginalValue;
+    commentInput.value = "";
     commentOverlay.style.display = "block";
+    updateDesktopXrefColumn(findMarkVerseRef(mark));
   }
+  // Typing a comment and closing this (Escape, tapping outside, or the
+  // dedicated remove button clearing the text first) adds the verse and the
+  // comment underneath it to the Journal, then clears the box - there's no
+  // Comments column for it to persist into any more.
   function closeCommentEditor() {
     var mark = activeCommentMark;
-    var newValue = commentInput.value;
-    applyComment(newValue);
-    if (mark && newValue.trim() && newValue !== commentOriginalValue) {
+    var text = commentInput.value.trim();
+    if (mark && text) {
       var ref = findMarkVerseRef(mark);
-      if (ref) logActivity("comment", ref.book, ref.chapter, ref.verse);
+      if (ref) {
+        addCommentToJournal(ref, text);
+        logActivity("comment", ref.book, ref.chapter, ref.verse);
+      }
     }
+    commentInput.value = "";
     commentOverlay.style.display = "none";
     activeCommentMark = null;
-  }
-  function applyComment(text) {
-    if (!activeCommentMark) return;
-    var mark = activeCommentMark;
-    var section = mark.closest(".chapter-section");
-    if (text && text.trim()) {
-      mark.setAttribute("data-comment", text);
-      mark.title = text;
-      mark.classList.add("commented");
-    } else {
-      mark.removeAttribute("data-comment");
-      mark.removeAttribute("title");
-      mark.classList.remove("commented");
-    }
-    if (section) saveHighlightState(section);
-    renderCommentsColumn();
   }
   markReadTodayBtn.addEventListener("click", function () {
     if (!activeCommentMark) return;
@@ -1928,18 +1891,8 @@
     parent.removeChild(mark);
     parent.normalize();
     if (section) saveHighlightState(section);
-    renderCommentsColumn();
   }
 
-  var commentSaveScheduled = false;
-  commentInput.addEventListener("input", function () {
-    if (commentSaveScheduled) return;
-    commentSaveScheduled = true;
-    requestAnimationFrame(function () {
-      commentSaveScheduled = false;
-      applyComment(commentInput.value);
-    });
-  });
   commentRemoveBtn.addEventListener("click", function () {
     commentInput.value = "";
     closeCommentEditor();
@@ -2172,6 +2125,7 @@
       return;
     }
     selectionMenuRef = ref;
+    updateDesktopXrefColumn(ref);
     if (sel.isCollapsed && hasCoords) {
       var flow = el.closest ? el.closest(".verse-flow") : null;
       var flowRect = flow && flow.getBoundingClientRect();
@@ -2421,6 +2375,29 @@
 
   function closeXrefOverlay() { xrefOverlay.style.display = "none"; }
 
+  // Desktop's third column (see getColumnIds) automatically shows cross
+  // references for whatever verse is currently selected or tapped in Read,
+  // instead of needing the Cross References button/overlay - see where
+  // checkSelectionForMenu calls this once it's determined the verse. A no-op
+  // on mobile, where this column doesn't exist.
+  var xrefsColumnList = document.getElementById("xrefs-column-list");
+  var xrefsColumnEmpty = document.getElementById("xrefs-column-empty");
+  function updateDesktopXrefColumn(ref) {
+    if (!isDesktopColumns() || !xrefsColumnList) return;
+    if (!ref) {
+      xrefsColumnList.innerHTML = "";
+      xrefsColumnEmpty.style.display = "block";
+      return;
+    }
+    xrefsColumnEmpty.style.display = "none";
+    xrefsColumnList.innerHTML = '<p class="xref-empty">Loading…</p>';
+    loadXrefData().then(function () {
+      renderXrefEntries(xrefsColumnList, ref);
+    }).catch(function () {
+      xrefsColumnList.innerHTML = '<p class="xref-empty">Couldn’t load cross reference data.</p>';
+    });
+  }
+
   function renderXrefList(ref, abbr) {
     xrefTitle.textContent = "Cross References — " + ref.book + " " + ref.chapter + ":" + ref.verse;
     var entries = (xrefData[abbr] && xrefData[abbr][String(ref.chapter)] && xrefData[abbr][String(ref.chapter)][String(ref.verse)]) || [];
@@ -2505,19 +2482,29 @@
     addToJournal(formatVerseOverviewLine(ref));
   });
 
-  var commentOverviewBtn = document.getElementById("comment-overview");
-  commentOverviewBtn.addEventListener("click", function () {
-    if (!activeCommentMark) return;
-    var ref = findMarkVerseRef(activeCommentMark);
-    if (!ref) return;
-    var comment = commentInput.value.trim();
-    var line = comment ? (ref.book + " " + ref.chapter + ":" + ref.verse + ": " + comment) : formatVerseOverviewLine(ref);
-    addToJournal(line);
-  });
-
   xrefCloseBtn.addEventListener("click", closeXrefOverlay);
   xrefOverlay.addEventListener("click", function (e) {
     if (e.target === xrefOverlay) closeXrefOverlay();
+  });
+
+  // ============================================================
+  // Search overlay - the Google search box and results used to be their own
+  // column in the mobile/desktop pager; it's a modal now instead, reachable
+  // from the magnifying-glass button in the Notes toolbar and the Read
+  // column's nav bar, which sidesteps the whole class of bug where the pager
+  // reacted to the search box's own focus/scroll behavior while typing.
+  // ============================================================
+  var searchOverlay = document.getElementById("search-overlay");
+  var searchOverlayCloseBtn = document.getElementById("search-overlay-close");
+  function openSearchOverlay() { searchOverlay.style.display = "flex"; }
+  function closeSearchOverlay() { searchOverlay.style.display = "none"; }
+  searchOverlayCloseBtn.addEventListener("click", closeSearchOverlay);
+  searchOverlay.addEventListener("click", function (e) {
+    if (e.target === searchOverlay) closeSearchOverlay();
+  });
+  document.getElementById("read-search-btn").addEventListener("click", openSearchOverlay);
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && searchOverlay.style.display !== "none") closeSearchOverlay();
   });
 
   bookSelect.addEventListener("change", function () {
@@ -2567,15 +2554,6 @@
     });
   }, { passive: true });
   readColumn.addEventListener("scroll", hideSelectionMenu, { passive: true });
-  // scheduleCommentsLayout itself now skips doing anything while a text field
-  // has focus (see its own comment) - covers this scroll as well as the
-  // on-screen keyboard opening/closing (which fires "resize", since the
-  // visual viewport shrinks) and a mobile browser auto-scrolling a
-  // newly-focused input into view (which fires this "scroll" - the one
-  // originally suspected of causing the freeze turned out not to be the
-  // only path into the same expensive layout work).
-  readColumn.addEventListener("scroll", function () { scheduleCommentsLayout(); }, { passive: true });
-  window.addEventListener("resize", function () { scheduleCommentsLayout(); });
 
   var positionSaveScheduled = false;
   function saveLastPosition() {
@@ -2652,12 +2630,6 @@
     });
   }
 
-  // ============================================================
-  // Comments column
-  // ============================================================
-  var commentsList = document.getElementById("comments-list");
-  var commentsEmpty = document.getElementById("comments-empty");
-
   function isDesktopColumns() {
     return window.matchMedia("(min-width: 1100px)").matches;
   }
@@ -2679,126 +2651,20 @@
     }, 1800);
   }
 
-  function buildCommentCard(refLabel, highlightText, commentText) {
-    var card = document.createElement("div");
-    card.className = "comment-card";
-
-    var ref = document.createElement("div");
-    ref.className = "comment-card-ref";
-    ref.textContent = refLabel;
-    card.appendChild(ref);
-
-    var hl = document.createElement("div");
-    hl.className = "comment-card-highlight";
-    hl.textContent = "“" + highlightText + "”";
-    card.appendChild(hl);
-
-    var text = document.createElement("div");
-    text.className = "comment-card-text";
-    text.textContent = commentText;
-    card.appendChild(text);
-
-    return card;
-  }
-
-  // Side by side with Read (desktop), comments sit level with the highlight
-  // they belong to - like a margin note - instead of a plain stacked list,
-  // and only for highlights currently on screen. On narrow screens Read and
-  // Comments are never visible at once, so there's nothing to line up against
-  // - it falls back to a plain scrollable list of every comment in the Bible.
-  function layoutCommentsDesktop() {
-    var marks = readerInited ? textEl.querySelectorAll("mark.highlight.commented") : [];
-    var cards = [];
-    marks.forEach(function (mark) {
-      var r = mark.getBoundingClientRect();
-      if (r.bottom < -200 || r.top > window.innerHeight + 200) return;
-      cards.push({ mark: mark, top: r.top });
-    });
-
-    commentsEmpty.style.display = cards.length ? "none" : "block";
-    commentsList.innerHTML = "";
-    commentsList.style.position = "static";
-    commentsList.style.minHeight = "";
-    // Fixed (viewport-relative) positioning, same as top: c.top would mean under
-    // position:fixed - matches mark.getBoundingClientRect() directly, with no
-    // offset-parent math needed, and stays correct regardless of what scrolls.
-    var colRect = commentsList.getBoundingClientRect();
-    cards.forEach(function (c) {
-      var mark = c.mark;
-      var section = mark.closest(".chapter-section");
-      var book = section.dataset.book, chapter = section.dataset.chapter;
-      var card = buildCommentCard(book + " " + chapter, mark.textContent, mark.getAttribute("data-comment") || "");
-      card.style.position = "fixed";
-      card.style.left = colRect.left + "px";
-      card.style.width = colRect.width + "px";
-      card.style.top = c.top + "px";
-      card.addEventListener("click", function () { openCommentEditor(mark); });
-      commentsList.appendChild(card);
-    });
-  }
-
-  // On mobile there's no side-by-side Comments column to speak of - instead,
-  // every commented highlight currently on screen gets a small floating badge
-  // right next to it, tapping which opens the same comment editor as tapping
-  // the highlight itself.
-  function layoutMobileCommentBadges() {
-    document.querySelectorAll(".mobile-comment-badge").forEach(function (b) { b.remove(); });
-    if (isDesktopColumns() || !readerInited) return;
-    // Read's content sits beside the other columns, not beneath them - its
-    // highlights can still be within the vertical bounds of whichever column
-    // is actually on screen, so only bother at all while Read is the one showing.
-    if (getColumnIds()[currentColumnIndex()] !== "col-read") return;
-    var marks = textEl.querySelectorAll("mark.highlight.commented");
-    marks.forEach(function (mark) {
-      var r = mark.getBoundingClientRect();
-      if (r.bottom < -40 || r.top > window.innerHeight + 40) return;
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "mobile-comment-badge";
-      btn.textContent = "\u{1F4AC}";
-      btn.title = "View/edit comment";
-      btn.style.top = Math.max(4, r.top - 6) + "px";
-      btn.style.left = Math.min(window.innerWidth - 36, r.right + 4) + "px";
-      btn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        openCommentEditor(mark);
-      });
-      document.body.appendChild(btn);
-    });
-  }
-
-  function renderCommentsColumn() {
-    if (isDesktopColumns()) layoutCommentsDesktop();
-    else layoutMobileCommentBadges();
-  }
-  window.matchMedia("(min-width: 1100px)").addEventListener("change", renderCommentsColumn);
-
-  // Shared by every scheduleCommentsLayout call site (window resize,
-  // readColumn's own scroll, the desktop/mobile breakpoint changing) - all of
-  // them can fire from a mobile browser auto-scrolling a newly-focused input
-  // into view, or the keyboard opening and shrinking the viewport, neither of
-  // which has anything to do with where comment cards/badges should sit.
-  // layoutCommentsDesktop/layoutMobileCommentBadges force a synchronous
-  // layout read (getBoundingClientRect/offsetLeft) to position them, which on
-  // a page this size - the whole Bible is ~1,189 content-visibility:auto
-  // sections - is exactly the kind of read that's expensive to do right as
-  // the viewport is unsettled, freezing the page for several seconds.
-  // The Google search box (inside #col-search) sometimes shuffles focus
+  // The Google search box (inside #search-overlay) sometimes shuffles focus
   // internally (e.g. showing its own autocomplete suggestions) for a tick
   // without document.activeElement being the <input> at that exact instant -
-  // a plain activeElement check can miss that and let a layout-forcing nudge
-  // slip through mid-keystroke, which is what caused the search column's
-  // view to jump around while typing. Focus staying anywhere inside the
-  // search column (plus a short grace period after it leaves) counts as
+  // a plain activeElement check can miss that. Focus staying anywhere inside
+  // the search overlay (plus a short grace period after it leaves) counts as
   // "typing" too, not just the exact input element.
   var searchFocusActive = false;
   var searchFocusGraceTimer = null;
-  var colSearchForFocus = document.getElementById("col-search");
-  colSearchForFocus.addEventListener("focusin", function () {
+  var searchOverlayForFocus = document.getElementById("search-overlay");
+  searchOverlayForFocus.addEventListener("focusin", function () {
     searchFocusActive = true;
     if (searchFocusGraceTimer) { clearTimeout(searchFocusGraceTimer); searchFocusGraceTimer = null; }
   });
-  colSearchForFocus.addEventListener("focusout", function () {
+  searchOverlayForFocus.addEventListener("focusout", function () {
     if (searchFocusGraceTimer) clearTimeout(searchFocusGraceTimer);
     searchFocusGraceTimer = setTimeout(function () { searchFocusActive = false; }, 500);
   });
@@ -2807,19 +2673,6 @@
     var active = document.activeElement;
     if (active && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable)) return true;
     return searchFocusActive;
-  }
-
-  var commentsLayoutScheduled = false;
-  function scheduleCommentsLayout() {
-    if (isTypingInTextField()) return;
-    if (commentsLayoutScheduled) return;
-    commentsLayoutScheduled = true;
-    requestAnimationFrame(function () {
-      commentsLayoutScheduled = false;
-      if (isTypingInTextField()) return;
-      if (isDesktopColumns()) layoutCommentsDesktop();
-      else layoutMobileCommentBadges();
-    });
   }
 
   // ============================================================
@@ -3060,6 +2913,29 @@
     var inserted = insertBulletInto(tab, text, anchorIndex);
     showToast("Added to Journal");
     focusJournalEntry(tab.id, inserted);
+  }
+
+  // Used when closing the verse comment box (see closeCommentEditor) - the
+  // verse goes on its own line, with the typed comment directly underneath
+  // it in the same entry, rather than as one run-on bullet like addToJournal.
+  function addCommentToJournal(ref, commentText) {
+    if (!ref || !commentText) return;
+    var verseText = lookupVerseText(ref) || "";
+    var verseLine = ref.book + " " + ref.chapter + ":" + ref.verse + (verseText ? " — " + verseText : "");
+    var tab = getOrCreateJournalTab();
+    ensureTodaysDateBlock(tab);
+    var anchorIndex = journalInsertIndex(tab);
+    var bulletHtml = "<li>" + escapeHtml(verseLine) + "<br>" + escapeHtml(commentText) + "</li>";
+    var before = tab.content.slice(0, anchorIndex);
+    var after = tab.content.slice(anchorIndex);
+    var ulOpenTag = after.match(/^\s*<ul[^>]*>/i);
+    tab.content = ulOpenTag
+      ? before + after.slice(0, ulOpenTag[0].length) + bulletHtml + after.slice(ulOpenTag[0].length)
+      : before + "<ul>" + bulletHtml + "</ul>" + after;
+    saveNotesTabs();
+    if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
+    showToast("Added to Journal");
+    focusJournalEntry(tab.id, verseLine + commentText);
   }
 
   // Turns journalCaretBlockIndex into a character offset into tab.content,
@@ -3354,6 +3230,7 @@
         showToast("No Bible reference found in that line");
       }
     });
+    makeBtn("🔍", "Search the Bible", openSearchOverlay);
   }
 
   function initNotesEditor() {
