@@ -685,6 +685,65 @@
     max-width: 24rem;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
   }
+  /* ---------- Cloud sync ---------- */
+  .notes-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .notes-title-row h1 { margin: 0; }
+  .sync-btn {
+    flex: 0 0 auto;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel);
+    color: var(--muted);
+    font-family: "Figtree", sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .sync-btn.sync-signed-out { color: var(--accent); border-color: var(--accent); }
+  .sync-btn.sync-problem { color: #b45309; border-color: #f59e0b; }
+  .account-box { max-width: 26rem; }
+  .account-box h3 {
+    margin: 0 0 0.5rem;
+    font-family: "Figtree", sans-serif;
+    font-size: 1.05rem;
+    color: var(--ink);
+  }
+  .account-note {
+    margin: 0 0 0.75rem;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    color: var(--muted);
+  }
+  .account-note strong { color: var(--ink); word-break: break-all; }
+  .account-input {
+    width: 100%;
+    padding: 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+    font: inherit;
+    font-size: 1rem;
+  }
+  .comment-actions button.account-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .comment-actions button:disabled { opacity: 0.5; cursor: default; }
+  .account-error {
+    margin: 0.6rem 0 0;
+    font-size: 0.85rem;
+    color: #b91c1c;
+  }
+  .account-error:empty { display: none; }
   #text-prompt-label {
     display: block;
     margin-bottom: 0.5rem;
@@ -1003,7 +1062,10 @@
 
     <section class="column" id="col-notes">
       <div class="column-pad">
-        <h1>Notes</h1>
+        <div class="notes-title-row">
+          <h1>Notes</h1>
+          <button id="sync-btn" class="sync-btn" type="button">&#9729; Sign in to sync</button>
+        </div>
         <div class="notes-sticky-header">
           <div id="notes-tab-bar" class="notes-tab-bar"></div>
           <div id="notes-toolbar" class="notes-toolbar-row"></div>
@@ -1089,6 +1151,44 @@
      native prompt() throws rather than showing anything in some mobile
      browser contexts (embedded webviews, standalone/PWA mode), which would
      otherwise make the Notes tab bar's +/rename silently fail there. -->
+<!-- Cloud sync sign-in - see the "Cloud sync" section of the script. -->
+<div id="account-overlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box account-box">
+    <h3>Sync across devices</h3>
+    <div id="account-signed-out">
+      <div id="account-step-email">
+        <p class="account-note">Sign in with your email to keep your notes, highlights and activity in sync on all your devices. We'll email you a one-time code &ndash; no password.</p>
+        <input id="account-email" class="account-input" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com">
+        <div class="comment-actions">
+          <span class="nav-spacer"></span>
+          <button id="account-cancel" type="button">Cancel</button>
+          <button id="account-send" class="account-primary" type="button">Send code</button>
+        </div>
+      </div>
+      <div id="account-step-code" style="display:none;">
+        <p class="account-note">Enter the code we emailed to <strong id="account-sent-to"></strong> &ndash; or open the link in that email on this device.</p>
+        <input id="account-code" class="account-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Code from the email">
+        <div class="comment-actions">
+          <button id="account-back" type="button">Different email</button>
+          <span class="nav-spacer"></span>
+          <button id="account-verify" class="account-primary" type="button">Verify</button>
+        </div>
+      </div>
+    </div>
+    <div id="account-signed-in" style="display:none;">
+      <p class="account-note">Signed in as <strong id="account-email-label"></strong></p>
+      <p class="account-note" id="account-last-sync"></p>
+      <div class="comment-actions">
+        <button id="account-signout" type="button">Sign out</button>
+        <span class="nav-spacer"></span>
+        <button id="account-sync-now" type="button">Sync now</button>
+        <button id="account-close" class="account-primary" type="button">Close</button>
+      </div>
+    </div>
+    <p id="account-error" class="account-error"></p>
+  </div>
+</div>
+
 <div id="text-prompt-overlay" class="modal-overlay" style="display:none;">
   <div class="modal-box">
     <label id="text-prompt-label" for="text-prompt-input"></label>
@@ -2222,7 +2322,16 @@
     var book = sectionEl.getAttribute("data-book");
     var chapter = sectionEl.getAttribute("data-chapter");
     var flow = sectionEl.querySelector(".verse-flow");
-    localStorage.setItem(highlightKey(book, chapter), flow.innerHTML);
+    // A tap's temporary grey flash (see flashVerse) is a wrapping <span> that
+    // only lives for a few seconds - unwrap it from what's saved, or
+    // highlighting within that window would bake the flash in permanently.
+    var copy = flow.cloneNode(true);
+    Array.prototype.forEach.call(copy.querySelectorAll(".verse-flash, .verse-flash-grey"), function (span) {
+      while (span.firstChild) span.parentNode.insertBefore(span.firstChild, span);
+      span.parentNode.removeChild(span);
+    });
+    localStorage.setItem(highlightKey(book, chapter), copy.innerHTML);
+    cloudMarkDirty("hl:" + book + ":" + chapter);
   }
 
   function wrapRangeInMark(range) {
@@ -3066,6 +3175,7 @@
     if (list.length > ACTIVITY_MAX) list.length = ACTIVITY_MAX;
     localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list));
     renderActivityColumn();
+    cloudMarkDirty("activity");
   }
 
   function renderActivityColumn() {
@@ -3217,6 +3327,7 @@
       tab = { id: "tab-" + Date.now(), name: OVERVIEW_TAB_NAME, content: "" };
       notesTabs.push(tab);
       saveNotesTabs();
+      cloudMarkNoteTabDirty(tab.id);
       renderNotesTabBar();
     }
     return tab;
@@ -3228,6 +3339,7 @@
       tab = { id: "tab-" + Date.now(), name: JOURNAL_TAB_NAME, content: "" };
       notesTabs.push(tab);
       saveNotesTabs();
+      cloudMarkNoteTabDirty(tab.id);
       renderNotesTabBar();
     }
     return tab;
@@ -3249,6 +3361,7 @@
       ? before + after.slice(0, ulOpenTag[0].length) + bulletHtml + after.slice(ulOpenTag[0].length)
       : before + "<ul>" + bulletHtml + "</ul>" + after;
     saveNotesTabs();
+    cloudMarkNoteTabDirty(tab.id);
     if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
     return text;
   }
@@ -3335,10 +3448,11 @@
     var stamped = ensureTodaysDateBlock(tab);
     if (editorShowsJournal) {
       if (stamped) notesEditor.setData(tab.content);
-      insertAtEditorCaret(html);
+      insertAtEditorCaret(html); // an undoable editor change, so the change:data listener marks it for sync
       saveActiveNotesTabContent();
     } else {
       fallbackInsert(tab);
+      cloudMarkNoteTabDirty(tab.id);
     }
     showToast("Added to Journal");
     focusJournalEntry(tab.id, matchText);
@@ -3543,6 +3657,7 @@
     if (legacy) {
       legacy.name = JOURNAL_TAB_NAME;
       localStorage.setItem(NOTES_TABS_KEY, JSON.stringify(notesTabs));
+      cloudMarkNoteTabDirty(legacy.id);
     }
   })();
   var activeNotesTabId = localStorage.getItem(NOTES_ACTIVE_TAB_KEY);
@@ -3590,6 +3705,7 @@
       activeNotesTabId = tab.id;
       localStorage.setItem(NOTES_ACTIVE_TAB_KEY, tab.id);
       saveNotesTabs();
+      cloudMarkNoteTabDirty(tab.id);
       showActiveNotesTabContent();
       renderNotesTabBar();
     });
@@ -3601,6 +3717,7 @@
       if (name === null) return;
       tab.name = name.trim() || tab.name;
       saveNotesTabs();
+      cloudMarkNoteTabDirty(tab.id);
       renderNotesTabBar();
     });
   }
@@ -3610,6 +3727,7 @@
     if (idx === -1) return;
     notesTabs.splice(idx, 1);
     saveNotesTabs();
+    cloudMarkNoteTabDeleted(id);
     if (activeNotesTabId === id) {
       activeNotesTabId = notesTabs[Math.max(0, idx - 1)].id;
       localStorage.setItem(NOTES_ACTIVE_TAB_KEY, activeNotesTabId);
@@ -3830,9 +3948,14 @@
       }, { priority: "high" });
 
       var saveTimer = null;
-      editor.model.document.on("change:data", function () {
+      editor.model.document.on("change:data", function (evt, batch) {
         clearTimeout(saveTimer);
         saveTimer = setTimeout(saveActiveNotesTabContent, 400);
+        // Only real edits (typing, toolbar commands, undo/redo, Add to
+        // Journal's own inserts) count as changes to sync - not setData()
+        // loading a tab, whose batch isn't undoable. Loading a tab can still
+        // reformat its HTML slightly, which would otherwise look like an edit.
+        if (batch && (batch.isUndoable || batch.isUndo)) cloudMarkNoteTabDirty(activeNotesTabId);
       });
     }).catch(function (err) {
       console.error("Failed to create Notes editor:", err);
@@ -3889,6 +4012,631 @@
     // it. A short delay lets that settle first.
     setTimeout(function () { notesVisibilityObserver.observe(colNotesEl); }, 800);
   }
+
+  // ============================================================
+  // Cloud sync (Supabase), with one-time-code email sign-in
+  //
+  // Same approach as the Flowchart app's sync, but keyed by the signed-in
+  // user rather than a pasted "Sync ID". Everything lives in one table,
+  // journal_sync (see supabase/migrations/*_journal_sync.sql), as key/value
+  // rows per user:
+  //   notes                -> { tabs: [{ id, name, content }] }
+  //   activity             -> { entries: [...] }   (Recent Activity)
+  //   hl:<book>:<chapter>  -> { html }             (one per highlighted chapter,
+  //                                                 so saving a highlight only
+  //                                                 uploads that one chapter)
+  // Reading position stays per-device.
+  //
+  // Every row has a `rev` the database bumps on each write. A poll first
+  // fetches just each row's key+rev, then downloads only the rows whose rev
+  // differs from what this device last saw (cloudSt().known). Writes are a
+  // compare-and-swap - an update filtered on rev=<the one we last saw> - so if
+  // another device wrote in between, nothing is written: this device pulls,
+  // merges, and retries instead.
+  //
+  // When: a sync ~0.8s after sign-in/load, every 8s while the page is
+  // visible, when it becomes visible again, 2s after any edit, and when the
+  // page is hidden. A sync always pulls (and merges) before it pushes.
+  //
+  // Merging:
+  //   notes     - per tab. A tab edited here since the last sync keeps this
+  //               device's version (so two devices editing different tabs
+  //               both survive; the same tab edited on both is last-write-
+  //               wins). Untouched tabs take the cloud's version, and tabs
+  //               deleted on one device are deleted on the other unless the
+  //               other edited them meanwhile.
+  //   activity  - both lists combined, de-duplicated.
+  //   highlights- per chapter, last write wins.
+  // The first sync on a device (including one that already has content from
+  // before signing in) merges rather than overwrites: see cloudMergeNotes and
+  // cloudApplyHighlight.
+  //
+  // Edits made while signed out are still tracked, and go up on the next
+  // sign-in. Known limits: two devices typing in the same note tab at once
+  // will lose one side, and changes arrive by polling, not instantly.
+  // ============================================================
+  var SUPABASE_URL = "https://hvzqoiffwcbaeuffsbhj.supabase.co";
+  // A publishable key - made to ship in client code. Each signed-in user only
+  // ever sees or changes their own rows because of the table's row level
+  // security policies, not because this key is secret.
+  var SUPABASE_KEY = "sb_publishable_q8Z12gtO-QrjgZiBb5negA_Gzu2EpHP";
+  var SUPABASE_JS_URL = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js";
+  var SYNC_TABLE = "journal_sync";
+
+  // Declared without "= null" on purpose: the hooks above (saveHighlightState,
+  // the "Daily Journal" migration...) can run before execution reaches this
+  // point, and lazily set cloudState via cloudSt() - an initializer here would
+  // then wipe what they recorded.
+  var sbClient;
+  var cloudUser;
+  var cloudState;
+  var cloudSyncing;
+  var cloudSyncAgain;
+  var cloudPushTimer;
+  var cloudPollTimer;
+  var cloudPendingEditorRefresh;
+  var cloudStatus;
+
+  function freshCloudState(userId) {
+    return {
+      userId: userId,
+      known: {},       // key -> rev this device's copy is based on
+      dirty: {},       // key -> edit counter, for keys with local changes not yet uploaded
+      seq: 0,
+      notesBase: null, // the notes row as last synced - null until this device's first sync
+      dirtyTabs: {},   // tab id -> edit counter, for note tabs edited here since the last sync
+      deletedTabs: {}, // tab id -> edit counter, for note tabs deleted here since the last sync
+      lastSyncedAt: null
+    };
+  }
+  // The storage key is written out literally (not a var) for the same reason
+  // as the declarations above: these run from hooks that can fire before
+  // execution gets this far.
+  function cloudSt() {
+    if (!cloudState) {
+      try { cloudState = JSON.parse(localStorage.getItem("cloud:state") || "null"); } catch (e) { cloudState = null; }
+      if (!cloudState) cloudState = freshCloudState(null);
+    }
+    return cloudState;
+  }
+  function saveCloudSt() {
+    try { localStorage.setItem("cloud:state", JSON.stringify(cloudSt())); } catch (e) { /* storage full - retried on the next change */ }
+  }
+
+  function cloudMarkDirty(key) {
+    var st = cloudSt();
+    st.dirty[key] = ++st.seq;
+    saveCloudSt();
+    cloudSchedulePush();
+  }
+  function cloudMarkNoteTabDirty(tabId) {
+    if (!tabId) return;
+    var st = cloudSt();
+    st.dirtyTabs[tabId] = ++st.seq;
+    cloudMarkDirty("notes");
+  }
+  function cloudMarkNoteTabDeleted(tabId) {
+    var st = cloudSt();
+    delete st.dirtyTabs[tabId];
+    st.deletedTabs[tabId] = ++st.seq;
+    cloudMarkDirty("notes");
+  }
+  function cloudSchedulePush() {
+    if (!cloudUser) return;
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = setTimeout(cloudSync, 2000);
+  }
+
+  // First sign-in on this device (or signing in as a different account):
+  // everything already here counts as not-yet-uploaded, so it gets merged into
+  // the account instead of being silently replaced by it.
+  function cloudMarkAllLocalDirty() {
+    var st = cloudSt();
+    notesTabs.forEach(function (t) { st.dirtyTabs[t.id] = ++st.seq; });
+    st.dirty.notes = ++st.seq;
+    if (loadActivity().length) st.dirty.activity = ++st.seq;
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf(HIGHLIGHT_PREFIX) === 0) st.dirty["hl:" + k.slice(HIGHLIGHT_PREFIX.length)] = ++st.seq;
+    }
+    saveCloudSt();
+  }
+
+  // ---------- helpers ----------
+  // DOMParser rather than innerHTML on a live element, so nothing in the
+  // markup (images, handlers) loads or runs while it's only being inspected.
+  function parseHtmlBody(html) {
+    return new DOMParser().parseFromString(html || "", "text/html").body;
+  }
+  function noteText(html) {
+    return (parseHtmlBody(html).textContent || "").replace(/\s+/g, " ").trim();
+  }
+  // A tab with nothing in it but the automatic date heading(s) and an empty
+  // "Thank God for:" box - e.g. a fresh device's Journal tab.
+  function isTrivialNoteTab(tab) {
+    var body = parseHtmlBody(tab.content);
+    Array.prototype.forEach.call(body.querySelectorAll("h4"), function (h) { h.remove(); });
+    return !(body.textContent || "").replace(/Thank God for:/g, "").replace(/\s+/g, " ").trim();
+  }
+  function cloneNoteTab(t) { return { id: t.id, name: t.name, content: t.content }; }
+  function indexNoteTabs(tabs) {
+    var out = {};
+    (tabs || []).forEach(function (t) { out[t.id] = t; });
+    return out;
+  }
+  function sameNoteTab(a, b) { return a.name === b.name && a.content === b.content; }
+  function countMarks(html) { return ((html || "").match(/<mark\b/g) || []).length; }
+  function activityId(e) { return [e.date, e.type, e.book, e.chapter, e.verse].join("|"); }
+
+  // ---------- pull ----------
+  function cloudPull() {
+    return sbClient.from(SYNC_TABLE).select("key,rev").then(function (res) {
+      if (res.error) throw res.error;
+      var st = cloudSt();
+      var changed = (res.data || []).filter(function (r) { return st.known[r.key] !== r.rev; }).map(function (r) { return r.key; });
+      if (!changed.length) return;
+      return cloudFetchRows(changed).then(function (rows) {
+        rows.forEach(cloudApplyRemoteRow);
+        saveCloudSt();
+      });
+    });
+  }
+  function cloudFetchRows(keys) {
+    var chunks = [];
+    for (var i = 0; i < keys.length; i += 40) chunks.push(keys.slice(i, i + 40));
+    return Promise.all(chunks.map(function (chunk) {
+      return sbClient.from(SYNC_TABLE).select("key,rev,data").in("key", chunk).then(function (res) {
+        if (res.error) throw res.error;
+        return res.data || [];
+      });
+    })).then(function (parts) { return [].concat.apply([], parts); });
+  }
+  function cloudApplyRemoteRow(row) {
+    var st = cloudSt();
+    var firstTime = st.known[row.key] == null;
+    var data = row.data || {};
+    if (row.key === "notes") cloudMergeNotes(data);
+    else if (row.key === "activity") cloudMergeActivity(data);
+    else if (row.key.indexOf("hl:") === 0) cloudApplyHighlight(row.key, data, firstTime);
+    st.known[row.key] = row.rev;
+  }
+
+  function cloudMergeNotes(remote) {
+    var st = cloudSt();
+    var base = st.notesBase;
+    var firstSync = !base;
+    var baseById = indexNoteTabs(base ? base.tabs : []);
+    var remoteTabs = (remote.tabs || []).filter(function (t) { return t && t.id; }).map(cloneNoteTab);
+    var remoteById = indexNoteTabs(remoteTabs);
+    var localById = indexNoteTabs(notesTabs);
+    var result = [];
+    var activeChanged = false;
+
+    remoteTabs.forEach(function (rt) {
+      var lt = localById[rt.id];
+      var bt = baseById[rt.id];
+      if (st.deletedTabs[rt.id]) {
+        if (bt && sameNoteTab(bt, rt)) return;  // deleted here, untouched there - stays deleted
+        delete st.deletedTabs[rt.id];           // edited elsewhere since - keep it after all
+      }
+      if (lt && st.dirtyTabs[rt.id]) { result.push(lt); return; } // unsynced edits here win
+      result.push(rt);
+      if (rt.id === activeNotesTabId && (!lt || lt.content !== rt.content)) activeChanged = true;
+    });
+
+    notesTabs.forEach(function (lt) {
+      if (remoteById[lt.id]) return;
+      // Was synced before, now gone from the cloud, not edited here: deleted elsewhere.
+      if (baseById[lt.id] && !st.dirtyTabs[lt.id]) return;
+      if (firstSync) {
+        // This device's tabs predate signing in, so their ids never match the
+        // account's - match by name instead. A same-named tab that's empty or
+        // identical is just dropped; one with different content is kept,
+        // renamed, rather than mixed into the account's.
+        var sameName = result.filter(function (t) { return t.name === lt.name; })[0];
+        if (sameName) {
+          if (isTrivialNoteTab(lt) || noteText(lt.content) === noteText(sameName.content)) {
+            delete st.dirtyTabs[lt.id];
+            return;
+          }
+          lt.name = lt.name + " (this device)";
+        }
+      }
+      result.push(lt);
+      st.dirtyTabs[lt.id] = st.dirtyTabs[lt.id] || ++st.seq;
+    });
+
+    if (!result.length) return; // never leave Notes with no tabs at all
+    notesTabs = result;
+    st.notesBase = { tabs: remoteTabs };
+    if (Object.keys(st.dirtyTabs).length || Object.keys(st.deletedTabs).length) {
+      st.dirty.notes = st.dirty.notes || ++st.seq;
+    } else {
+      delete st.dirty.notes;
+    }
+    if (!notesTabs.some(function (t) { return t.id === activeNotesTabId; })) {
+      activeNotesTabId = notesTabs[0].id;
+      localStorage.setItem(NOTES_ACTIVE_TAB_KEY, activeNotesTabId);
+      activeChanged = true;
+    }
+    saveNotesTabs();
+    renderNotesTabBar();
+    if (activeChanged) cloudRefreshNotesEditor();
+  }
+
+  // Shows remote changes to the open tab - unless you're typing in it right
+  // now, in which case it waits until the editor loses focus (checked at the
+  // start of each sync) rather than yanking the text out from under you.
+  function cloudRefreshNotesEditor() {
+    if (!notesEditor) return; // the editor reads the current tab itself once it loads
+    if (notesEditor.editing.view.document.isFocused) {
+      cloudPendingEditorRefresh = true;
+      return;
+    }
+    cloudPendingEditorRefresh = false;
+    showActiveNotesTabContent();
+  }
+
+  function cloudMergeActivity(remote) {
+    var st = cloudSt();
+    var remoteEntries = Array.isArray(remote.entries) ? remote.entries : [];
+    var remoteIds = {};
+    remoteEntries.forEach(function (e) { remoteIds[activityId(e)] = true; });
+    var seen = {};
+    var merged = [];
+    remoteEntries.concat(loadActivity()).forEach(function (e) {
+      var id = activityId(e);
+      if (seen[id]) return;
+      seen[id] = true;
+      merged.push(e);
+    });
+    merged.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+    if (merged.length > ACTIVITY_MAX) merged.length = ACTIVITY_MAX;
+    if (merged.some(function (e) { return !remoteIds[activityId(e)]; })) {
+      st.dirty.activity = st.dirty.activity || ++st.seq;
+    } else {
+      delete st.dirty.activity;
+    }
+    localStorage.setItem(ACTIVITY_KEY, JSON.stringify(merged));
+    renderActivityColumn();
+  }
+
+  function cloudApplyHighlight(key, data, firstTime) {
+    var st = cloudSt();
+    var bookChapter = key.slice(3);
+    var lsKey = HIGHLIGHT_PREFIX + bookChapter;
+    if (typeof data.html !== "string") return;
+    if (st.dirty[key]) {
+      // Unsynced highlight changes here win - except the first time this
+      // device meets this chapter in the cloud (e.g. first sign-in), where
+      // whichever copy has more highlights is kept, rather than this device's
+      // possibly older copy overwriting the account's.
+      if (!firstTime) return;
+      if (countMarks(data.html) <= countMarks(localStorage.getItem(lsKey))) return;
+      delete st.dirty[key];
+    }
+    localStorage.setItem(lsKey, data.html);
+    cloudRefreshRenderedChapter(bookChapter);
+  }
+  function cloudRefreshRenderedChapter(bookChapter) {
+    var idx = bookChapter.lastIndexOf(":");
+    var book = bookChapter.slice(0, idx);
+    var chapter = bookChapter.slice(idx + 1);
+    if (book !== currentRenderedBook) return;
+    var section = document.getElementById(sectionId(book, chapter));
+    if (!section) return;
+    // Leave a chapter alone while its highlight box is open on one of its marks.
+    if (activeCommentMark && section.contains(activeCommentMark)) return;
+    var flow = section.querySelector(".verse-flow");
+    if (flow) flow.innerHTML = localStorage.getItem(HIGHLIGHT_PREFIX + bookChapter);
+  }
+
+  // ---------- push ----------
+  function flushNotesEditorForCloud() {
+    if (notesEditor) saveActiveNotesTabContent();
+  }
+
+  // Resolves true if written, false if the row changed elsewhere first (or
+  // already existed) - in which case the caller pulls, merges and retries.
+  function cloudCasWrite(key, data) {
+    var st = cloudSt();
+    var known = st.known[key];
+    var query = known == null
+      ? sbClient.from(SYNC_TABLE).insert({ key: key, data: data }).select("rev")
+      : sbClient.from(SYNC_TABLE).update({ data: data }).eq("key", key).eq("rev", known).select("rev");
+    return query.then(function (res) {
+      if (res.error) {
+        if (res.error.code === "23505") return false; // another device created this row first
+        throw res.error;
+      }
+      if (!res.data || !res.data.length) return false;
+      st.known[key] = res.data[0].rev;
+      return true;
+    });
+  }
+
+  function cloudPushKey(key) {
+    var st = cloudSt();
+    var seq = st.dirty[key];
+    if (key === "notes") {
+      var snapTabs = Object.assign({}, st.dirtyTabs);
+      var snapDeleted = Object.assign({}, st.deletedTabs);
+      var payload = { tabs: notesTabs.map(cloneNoteTab) };
+      return cloudCasWrite(key, payload).then(function (ok) {
+        if (!ok) return false;
+        st.notesBase = payload;
+        // Only clear what was actually in this upload - anything edited again
+        // while it was in flight stays marked for the next one.
+        Object.keys(snapTabs).forEach(function (id) { if (st.dirtyTabs[id] === snapTabs[id]) delete st.dirtyTabs[id]; });
+        Object.keys(snapDeleted).forEach(function (id) { if (st.deletedTabs[id] === snapDeleted[id]) delete st.deletedTabs[id]; });
+        if (!Object.keys(st.dirtyTabs).length && !Object.keys(st.deletedTabs).length && st.dirty.notes === seq) delete st.dirty.notes;
+        return true;
+      });
+    }
+    var data;
+    if (key === "activity") {
+      data = { entries: loadActivity() };
+    } else if (key.indexOf("hl:") === 0) {
+      var html = localStorage.getItem(HIGHLIGHT_PREFIX + key.slice(3));
+      if (html === null) { delete st.dirty[key]; return Promise.resolve(true); }
+      data = { html: html };
+    } else {
+      delete st.dirty[key];
+      return Promise.resolve(true);
+    }
+    return cloudCasWrite(key, data).then(function (ok) {
+      if (ok && st.dirty[key] === seq) delete st.dirty[key];
+      return ok;
+    });
+  }
+
+  function cloudPushDirty(attempt) {
+    flushNotesEditorForCloud();
+    var keys = Object.keys(cloudSt().dirty);
+    if (!keys.length) return Promise.resolve();
+    var conflict = false;
+    return keys.reduce(function (p, key) {
+      return p.then(function () {
+        return cloudPushKey(key).then(function (ok) { if (!ok) conflict = true; });
+      });
+    }, Promise.resolve()).then(function () {
+      saveCloudSt();
+      if (conflict && attempt < 3) {
+        return cloudPull().then(function () { return cloudPushDirty(attempt + 1); });
+      }
+    });
+  }
+
+  // ---------- the sync loop ----------
+  function cloudSync() {
+    if (!sbClient || !cloudUser) return Promise.resolve();
+    if (cloudSyncing) { cloudSyncAgain = true; return cloudSyncing; }
+    clearTimeout(cloudPushTimer);
+    if (cloudPendingEditorRefresh) cloudRefreshNotesEditor();
+    if (cloudStatus !== "synced") setCloudStatus("syncing");
+    cloudSyncing = cloudPull()
+      .then(function () { return cloudPushDirty(0); })
+      .then(function () {
+        var st = cloudSt();
+        st.lastSyncedAt = Date.now();
+        saveCloudSt();
+        setCloudStatus(Object.keys(st.dirty).length ? "pending" : "synced");
+      })
+      .catch(function (err) {
+        console.warn("Cloud sync failed - will retry:", err);
+        setCloudStatus("offline");
+      })
+      .then(function () {
+        cloudSyncing = null;
+        if (cloudSyncAgain) { cloudSyncAgain = false; cloudSync(); }
+      });
+    return cloudSyncing;
+  }
+
+  function cloudStart() {
+    clearInterval(cloudPollTimer);
+    setTimeout(cloudSync, 800);
+    cloudPollTimer = setInterval(function () {
+      if (document.visibilityState === "visible") cloudSync();
+    }, 8000);
+  }
+  function cloudStop() {
+    clearInterval(cloudPollTimer);
+    clearTimeout(cloudPushTimer);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!cloudUser) return;
+    if (document.visibilityState === "visible") {
+      cloudSync();
+    } else {
+      flushNotesEditorForCloud();
+      if (Object.keys(cloudSt().dirty).length) cloudSync();
+    }
+  });
+
+  // ---------- sign-in ----------
+  function cloudHandleSession(session) {
+    var user = session && session.user;
+    if (!user) {
+      if (cloudUser) cloudStop();
+      cloudUser = null;
+      setCloudStatus("signedOut");
+      renderAccountOverlay();
+      return;
+    }
+    if (cloudUser && cloudUser.id === user.id) return; // e.g. a token refresh
+    cloudUser = { id: user.id, email: user.email };
+    if (cloudSt().userId !== user.id) {
+      cloudState = freshCloudState(user.id);
+      cloudMarkAllLocalDirty();
+    }
+    renderAccountOverlay();
+    cloudStart();
+  }
+
+  function loadScriptOnce(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  function cloudInit() {
+    setCloudStatus("signedOut");
+    loadScriptOnce(SUPABASE_JS_URL).then(function () {
+      sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+      });
+      sbClient.auth.onAuthStateChange(function (event, session) {
+        // Deferred: Supabase warns that calling back into the client from
+        // inside this callback can deadlock it.
+        setTimeout(function () { cloudHandleSession(session); }, 0);
+      });
+    }).catch(function () {
+      setCloudStatus("unavailable");
+    });
+  }
+
+  // ---------- UI ----------
+  var syncBtn = document.getElementById("sync-btn");
+  var accountOverlay = document.getElementById("account-overlay");
+  var accountEmailInput = document.getElementById("account-email");
+  var accountCodeInput = document.getElementById("account-code");
+  var accountError = document.getElementById("account-error");
+  var accountSendBtn = document.getElementById("account-send");
+  var accountVerifyBtn = document.getElementById("account-verify");
+  var accountPendingEmail = null;
+
+  var CLOUD_STATUS_LABELS = {
+    signedOut: "Sign in to sync",
+    syncing: "Syncing…",
+    synced: "Synced",
+    pending: "Changes waiting",
+    offline: "Offline – will retry",
+    unavailable: "Sync unavailable"
+  };
+  function setCloudStatus(status) {
+    cloudStatus = status;
+    if (!syncBtn) return;
+    syncBtn.textContent = "☁ " + CLOUD_STATUS_LABELS[status];
+    syncBtn.classList.toggle("sync-signed-out", status === "signedOut");
+    syncBtn.classList.toggle("sync-problem", status === "offline" || status === "pending" || status === "unavailable");
+    if (accountOverlay.style.display !== "none") renderAccountOverlay();
+  }
+
+  function renderAccountOverlay() {
+    var signedIn = !!cloudUser;
+    document.getElementById("account-signed-in").style.display = signedIn ? "" : "none";
+    document.getElementById("account-signed-out").style.display = signedIn ? "none" : "";
+    if (signedIn) {
+      document.getElementById("account-email-label").textContent = cloudUser.email || "";
+      var at = cloudSt().lastSyncedAt;
+      document.getElementById("account-last-sync").textContent = at
+        ? "Last synced " + new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) + "."
+        : "Syncing for the first time…";
+    } else {
+      var codeStep = !!accountPendingEmail;
+      document.getElementById("account-step-email").style.display = codeStep ? "none" : "";
+      document.getElementById("account-step-code").style.display = codeStep ? "" : "none";
+      if (codeStep) document.getElementById("account-sent-to").textContent = accountPendingEmail;
+    }
+  }
+  function openAccountOverlay() {
+    accountError.textContent = "";
+    renderAccountOverlay();
+    accountOverlay.style.display = "flex";
+    if (!cloudUser) (accountPendingEmail ? accountCodeInput : accountEmailInput).focus();
+  }
+  function closeAccountOverlay() { accountOverlay.style.display = "none"; }
+
+  syncBtn.addEventListener("click", function () {
+    if (cloudStatus === "unavailable") {
+      showToast("Couldn't reach the sync service - check your connection and reload.");
+      return;
+    }
+    openAccountOverlay();
+  });
+  accountOverlay.addEventListener("click", function (e) { if (e.target === accountOverlay) closeAccountOverlay(); });
+  document.getElementById("account-cancel").addEventListener("click", closeAccountOverlay);
+  document.getElementById("account-close").addEventListener("click", closeAccountOverlay);
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && accountOverlay.style.display !== "none") closeAccountOverlay();
+  });
+
+  function sendSignInCode() {
+    var email = accountEmailInput.value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      accountError.textContent = "Enter a valid email address.";
+      return;
+    }
+    if (!sbClient) return;
+    accountError.textContent = "";
+    accountSendBtn.disabled = true;
+    sbClient.auth.signInWithOtp({
+      email: email,
+      options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname }
+    }).then(function (res) {
+      accountSendBtn.disabled = false;
+      if (res.error) {
+        accountError.textContent = res.error.message || "Couldn't send the code - try again in a minute.";
+        return;
+      }
+      accountPendingEmail = email;
+      accountCodeInput.value = "";
+      renderAccountOverlay();
+      accountCodeInput.focus();
+    });
+  }
+  function verifySignInCode() {
+    var code = accountCodeInput.value.replace(/\s+/g, "");
+    if (!/^\d{6,10}$/.test(code)) {
+      accountError.textContent = "Enter the code from the email.";
+      return;
+    }
+    accountError.textContent = "";
+    accountVerifyBtn.disabled = true;
+    sbClient.auth.verifyOtp({ email: accountPendingEmail, token: code, type: "email" }).then(function (res) {
+      accountVerifyBtn.disabled = false;
+      if (res.error) {
+        accountError.textContent = res.error.message || "That code didn't work - check it, or send a new one.";
+        return;
+      }
+      accountPendingEmail = null;
+      closeAccountOverlay();
+      showToast("Signed in - syncing");
+    });
+  }
+  accountSendBtn.addEventListener("click", sendSignInCode);
+  accountEmailInput.addEventListener("keydown", function (e) { if (e.key === "Enter") sendSignInCode(); });
+  accountVerifyBtn.addEventListener("click", verifySignInCode);
+  accountCodeInput.addEventListener("keydown", function (e) { if (e.key === "Enter") verifySignInCode(); });
+  document.getElementById("account-back").addEventListener("click", function () {
+    accountPendingEmail = null;
+    accountError.textContent = "";
+    renderAccountOverlay();
+    accountEmailInput.focus();
+  });
+  document.getElementById("account-sync-now").addEventListener("click", function () {
+    cloudSync().then(renderAccountOverlay);
+  });
+  // Signing out keeps this device's copy of everything, and the sync
+  // bookkeeping too - so signing back into the same account carries on where
+  // it left off (including uploading anything changed while signed out),
+  // while a different account gets a fresh first-time merge.
+  document.getElementById("account-signout").addEventListener("click", function () {
+    var finish = function () {
+      sbClient.auth.signOut().then(function () {
+        closeAccountOverlay();
+        showToast("Signed out");
+      });
+    };
+    cloudSync().then(finish, finish);
+  });
+
+  cloudInit();
 </script>
 </body>
 </html>
