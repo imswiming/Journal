@@ -3771,19 +3771,16 @@
   }
 
   // Verse text added to the Journal keeps the same light grey as the flash,
-  // permanently, so scripture stands out from what you wrote yourself. A
-  // book emoji follows it inside the same marked text, and is part of what
-  // focusJournalEntry matches on - hence JOURNAL_VERSE_TAIL on matchText.
-  var JOURNAL_VERSE_TAIL = " " + String.fromCharCode(0xD83D, 0xDCD6);
+  // permanently, so scripture stands out from what you wrote yourself.
   function journalVerseMark(text) {
-    return '<mark class="marker-grey">' + escapeHtml(text + JOURNAL_VERSE_TAIL) + "</mark>";
+    return '<mark class="marker-grey">' + escapeHtml(text) + "</mark>";
   }
 
   // A verse on its own - search results, cross references, Recent Activity,
   // the selection menu's and highlight box's "Add to Journal".
   function addScriptureToJournal(text) {
     if (!text) return;
-    addBulletToJournal(journalVerseMark(text), text + JOURNAL_VERSE_TAIL);
+    addBulletToJournal(journalVerseMark(text), text);
   }
 
   // A verse with a comment typed on it (see closeCommentEditor and the
@@ -3795,7 +3792,7 @@
     var verseLine = ref.book + " " + ref.chapter + ":" + ref.verse + (verseText ? " — " + verseText : "");
     addBulletToJournal(
       journalVerseMark(verseLine) + "<ul><li>" + escapeHtml(commentText) + "</li></ul>",
-      verseLine + JOURNAL_VERSE_TAIL + commentText
+      verseLine + commentText
     );
   }
 
