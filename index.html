@@ -96,15 +96,22 @@
      that was already sitting there underneath, rather than leaving behind an
      empty gap the size of the bar - content panels reserve room for it via
      padding-top below instead of via .columns-wrap's own height. */
+  /* Explicit rather than content-sized, so .column's padding-top below can
+     reserve exactly this much room - the sticky Notes header and Read nav
+     bar rest at that padding edge, and a mismatch shows as them tucking
+     slightly under this bar. */
+  :root { --column-tabs-height: 62px; }
   .column-tabs {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     z-index: 10;
+    height: var(--column-tabs-height);
+    align-items: center;
     display: flex;
     gap: 0.5rem;
-    padding: 0.75rem 1rem;
+    padding: 0 1rem;
     background: var(--bg);
     border-bottom: 1px solid var(--line);
     transition: transform 0.25s ease;
@@ -147,7 +154,7 @@
     /* Room for the fixed .column-tabs bar above (its own height - see there) -
        scrolling this column up reveals that content right behind the bar,
        the same content .tabs-hidden also reveals when the bar slides away. */
-    padding-top: 56px;
+    padding-top: var(--column-tabs-height);
     scrollbar-width: none;
   }
   .column::-webkit-scrollbar { display: none; }
@@ -181,7 +188,8 @@
     top: 0;
     z-index: 5;
     background: var(--bg);
-    padding-bottom: 0.5rem;
+    padding: 0.5rem 0;
+    transition: transform 0.25s ease, opacity 0.25s ease;
   }
   .notes-toolbar-row {
     display: flex;
@@ -425,9 +433,16 @@
     gap: 0.5rem;
     flex-wrap: wrap;
     align-items: center;
-    transition: transform 0.25s ease;
+    transition: transform 0.25s ease, opacity 0.25s ease;
   }
-  .nav-bar.nav-hidden { transform: translateY(-130%); }
+  /* Shared by .nav-bar and .notes-sticky-header - see autoHideOnScroll. The
+     fade matters near the top of a column, where the bar hasn't stuck yet
+     and sliding it up would otherwise pass visibly over the heading. */
+  .bar-hidden {
+    transform: translateY(-130%);
+    opacity: 0;
+    pointer-events: none;
+  }
   .nav-bar select {
     padding: 0.5rem 0.6rem;
     border: 1px solid var(--line);
@@ -2529,27 +2544,67 @@
     }
   });
 
-  var navBarEl = document.querySelector(".nav-bar");
-  var lastScrollY = 0;
-  var navScrollScheduled = false;
-  function updateNavBarVisibility() {
-    var y = readColumn.scrollTop;
-    if (y > lastScrollY && y > navBarEl.offsetHeight) {
-      navBarEl.classList.add("nav-hidden");
-    } else if (y < lastScrollY) {
-      navBarEl.classList.remove("nav-hidden");
+  // Slides a sticky bar out of view as soon as its column starts scrolling
+  // down (past a few px of jitter), and back in as soon as it scrolls up.
+  // With userScrollOnly, only scrolling done with a finger or mouse wheel
+  // counts - not the editor scrolling itself to keep the caret in view while
+  // typing, which would otherwise hide the toolbar right when it's in use.
+  function autoHideOnScroll(scrollEl, barEl, userScrollOnly) {
+    var THRESHOLD = 8;
+    var anchorY = scrollEl.scrollTop;
+    var scheduled = false;
+    var lastUserScrollAt = 0;
+    if (userScrollOnly) {
+      var markUserScroll = function () { lastUserScrollAt = Date.now(); };
+      scrollEl.addEventListener("touchmove", markUserScroll, { passive: true });
+      scrollEl.addEventListener("wheel", markUserScroll, { passive: true });
     }
-    lastScrollY = y;
+    scrollEl.addEventListener("scroll", function () {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(function () {
+        scheduled = false;
+        var y = scrollEl.scrollTop;
+        // A momentum fling keeps scrolling for a while after the finger
+        // lifts, hence the generous window rather than "is a finger down".
+        if (userScrollOnly && Date.now() - lastUserScrollAt > 1000) {
+          anchorY = y;
+          return;
+        }
+        // anchorY follows the scroll while it keeps going the same way, so
+        // THRESHOLD measures a reversal from the furthest point reached.
+        if (barEl.classList.contains("bar-hidden")) {
+          if (y > anchorY) anchorY = y;
+          else if (anchorY - y > THRESHOLD || y <= 0) { barEl.classList.remove("bar-hidden"); anchorY = y; }
+        } else {
+          if (y < anchorY) anchorY = y;
+          else if (y - anchorY > THRESHOLD) { barEl.classList.add("bar-hidden"); anchorY = y; }
+        }
+      });
+    }, { passive: true });
   }
-  readColumn.addEventListener("scroll", function () {
-    if (navScrollScheduled) return;
-    navScrollScheduled = true;
-    requestAnimationFrame(function () {
-      navScrollScheduled = false;
-      updateNavBarVisibility();
-    });
-  }, { passive: true });
+
+  var navBarEl = document.querySelector(".nav-bar");
+  autoHideOnScroll(readColumn, navBarEl, false);
+  autoHideOnScroll(document.getElementById("col-notes"), document.querySelector(".notes-sticky-header"), true);
   readColumn.addEventListener("scroll", hideSelectionMenu, { passive: true });
+
+  // The highlight box (see openCommentEditor) closes on scrolling Read too,
+  // like the selection menu above - only for a scroll the user actually made
+  // with a finger/wheel, and never while its own comment box has focus,
+  // since the on-screen keyboard opening can scroll the page by itself.
+  // Closing it this way still adds any typed comment to the Journal, same
+  // as tapping outside it does.
+  var readUserScrollAt = 0;
+  function markReadUserScroll() { readUserScrollAt = Date.now(); }
+  readColumn.addEventListener("touchmove", markReadUserScroll, { passive: true });
+  readColumn.addEventListener("wheel", markReadUserScroll, { passive: true });
+  readColumn.addEventListener("scroll", function () {
+    if (commentOverlay.style.display === "none") return;
+    if (document.activeElement === commentInput) return;
+    if (Date.now() - readUserScrollAt > 1000) return;
+    closeCommentEditor();
+  }, { passive: true });
 
   var positionSaveScheduled = false;
   function saveLastPosition() {
