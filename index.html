@@ -627,6 +627,25 @@
     cursor: pointer;
     white-space: nowrap;
   }
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: max(1.5rem, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    z-index: 60;
+    background: var(--ink);
+    color: var(--panel);
+    font-family: "Figtree", sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.7rem 1.2rem;
+    border-radius: 999px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .toast.toast-visible { opacity: 1; }
   .modal-overlay {
     position: fixed;
     inset: 0;
@@ -899,10 +918,13 @@
 <div id="selection-menu" class="selection-menu" style="display:none;">
   <button id="selection-highlight-btn" type="button">Highlight</button>
   <button id="selection-highlight-verse-btn" type="button">Highlight verse</button>
+  <button id="selection-read-btn" type="button">I read this</button>
   <button id="view-biblehub" type="button">View on BibleHub</button>
   <button id="view-xrefs" type="button">Cross References</button>
-  <button id="selection-overview-btn" type="button">Add to Notes</button>
+  <button id="selection-overview-btn" type="button">Add to Journal</button>
 </div>
+
+<div id="toast" class="toast" style="display:none;"></div>
 
 <div id="xref-overlay" class="modal-overlay" style="display:none;">
   <div class="modal-box xref-box">
@@ -922,7 +944,7 @@
     <div class="comment-actions">
       <button id="comment-biblehub" type="button">View on BibleHub</button>
       <button id="comment-xrefs" type="button">Cross References</button>
-      <button id="comment-overview" type="button">Add to Notes</button>
+      <button id="comment-overview" type="button">Add to Journal</button>
     </div>
     <div class="comment-actions">
       <button id="comment-remove" type="button">Remove comment</button>
@@ -1794,6 +1816,7 @@
   var selectionMenu = document.getElementById("selection-menu");
   var selectionHighlightBtn = document.getElementById("selection-highlight-btn");
   var selectionHighlightVerseBtn = document.getElementById("selection-highlight-verse-btn");
+  var selectionReadBtn = document.getElementById("selection-read-btn");
 
   var commentOverlay = document.getElementById("comment-overlay");
   var commentInput = document.getElementById("comment-input");
@@ -2274,6 +2297,16 @@
     logActivity("highlight", ref.book, ref.chapter, ref.verse);
   });
 
+  selectionReadBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+  selectionReadBtn.addEventListener("click", function () {
+    var ref = findSelectionVerseRef();
+    hideSelectionMenu();
+    window.getSelection().removeAllRanges();
+    if (!ref) return;
+    logActivity("read", ref.book, ref.chapter, ref.verse);
+    showToast("Marked as read");
+  });
+
   textEl.addEventListener("click", function (e) {
     var mark = e.target.closest ? e.target.closest("mark.highlight") : null;
     if (!mark) return;
@@ -2419,7 +2452,7 @@
     var ref = findSelectionVerseRef();
     hideSelectionMenu();
     window.getSelection().removeAllRanges();
-    addToActiveNote(formatVerseOverviewLine(ref));
+    addToJournal(formatVerseOverviewLine(ref));
   });
 
   var commentOverviewBtn = document.getElementById("comment-overview");
@@ -2429,7 +2462,7 @@
     if (!ref) return;
     var comment = commentInput.value.trim();
     var line = comment ? (ref.book + " " + ref.chapter + ":" + ref.verse + ": " + comment) : formatVerseOverviewLine(ref);
-    addToActiveNote(line);
+    addToJournal(line);
   });
 
   xrefCloseBtn.addEventListener("click", closeXrefOverlay);
@@ -2577,6 +2610,23 @@
 
   function isDesktopColumns() {
     return window.matchMedia("(min-width: 1100px)").matches;
+  }
+
+  // Brief bottom-of-screen confirmation (e.g. "Added to Overview") for
+  // actions that don't otherwise navigate anywhere, so there's still some
+  // feedback that something happened.
+  var toastEl = document.getElementById("toast");
+  var toastHideTimer = null;
+  function showToast(message) {
+    if (!toastEl) return;
+    clearTimeout(toastHideTimer);
+    toastEl.textContent = message;
+    toastEl.style.display = "block";
+    requestAnimationFrame(function () { toastEl.classList.add("toast-visible"); });
+    toastHideTimer = setTimeout(function () {
+      toastEl.classList.remove("toast-visible");
+      setTimeout(function () { toastEl.style.display = "none"; }, 200);
+    }, 1800);
   }
 
   function buildCommentCard(refLabel, highlightText, commentText) {
@@ -2785,11 +2835,11 @@
       var overviewBtn = document.createElement("button");
       overviewBtn.type = "button";
       overviewBtn.className = "activity-overview-btn";
-      overviewBtn.title = "Add to Notes";
+      overviewBtn.title = "Add to Journal";
       overviewBtn.textContent = "+";
       overviewBtn.addEventListener("click", function (e) {
         e.stopPropagation();
-        addToActiveNote((ACTIVITY_LABELS[entry.type] || entry.type) + " " + ref.textContent);
+        addToJournal((ACTIVITY_LABELS[entry.type] || entry.type) + " " + ref.textContent);
       });
       row.appendChild(overviewBtn);
 
@@ -2864,8 +2914,10 @@
   // buttons add to; see addOverviewEntry.
   // ============================================================
   var OVERVIEW_TAB_NAME = "Overview";
+  var JOURNAL_TAB_NAME = "Journal";
   var GRATITUDE_HTML = "<blockquote><p><i>Thank God for: </i></p></blockquote>";
   function isOverviewTab(tab) { return !!tab && tab.name === OVERVIEW_TAB_NAME; }
+  function isJournalTab(tab) { return !!tab && tab.name === JOURNAL_TAB_NAME; }
   function escapeHtml(s) {
     var div = document.createElement("div");
     div.textContent = s;
@@ -2875,10 +2927,11 @@
     var heading = new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" });
     return "<h4>" + escapeHtml(heading) + "</h4>";
   }
-  // Stamps today's date + gratitude box at the top of a (non-Overview) tab,
-  // unless it's already there - safe to call every time a tab is shown.
+  // Stamps today's date + gratitude box at the top of the Journal tab only,
+  // unless it's already there - safe to call every time the tab is shown.
+  // Other tabs (Overview, Prayer List, any custom note) never get this.
   function ensureTodaysDateBlock(tab) {
-    if (!tab || isOverviewTab(tab)) return;
+    if (!tab || !isJournalTab(tab)) return;
     var headingHtml = todaysHeadingHtml();
     if (tab.content.indexOf(headingHtml) === 0) return;
     var newBlock = headingHtml + GRATITUDE_HTML;
@@ -2897,11 +2950,25 @@
     return tab;
   }
 
+  function getOrCreateJournalTab() {
+    var tab = notesTabs.filter(isJournalTab)[0];
+    if (!tab) {
+      tab = { id: "tab-" + Date.now(), name: JOURNAL_TAB_NAME, content: "" };
+      notesTabs.push(tab);
+      saveNotesTabs();
+      renderNotesTabBar();
+    }
+    return tab;
+  }
+
   // Prepends a bullet into tab.content just after `anchorIndex`, reusing an
   // existing <ul> there if one's already present instead of starting a new
-  // list every time.
+  // list every time. Returns the inserted text so callers can find (and
+  // scroll to / flash) the entry afterward - an id attribute doesn't survive
+  // this, since CKEditor's data processor strips attributes outside its own
+  // schema when the content round-trips through setData/getData.
   function insertBulletInto(tab, text, anchorIndex) {
-    if (!text) return;
+    if (!text) return null;
     var bulletHtml = "<li>" + escapeHtml(text) + "</li>";
     var before = tab.content.slice(0, anchorIndex);
     var after = tab.content.slice(anchorIndex);
@@ -2911,26 +2978,100 @@
       : before + "<ul>" + bulletHtml + "</ul>" + after;
     saveNotesTabs();
     if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
+    return text;
   }
 
   function addOverviewEntry(text) {
     if (!text) return;
     insertBulletInto(getOrCreateOverviewTab(), text, 0);
+    showToast("Added to Overview");
   }
 
-  // "Add to Notes" (search results, cross references, comments, Recent
-  // Activity) inserts into whichever note tab is currently active, not the
-  // Overview tab - it lands right after today's date/gratitude block so it
-  // stays with today's entries rather than above the date heading.
-  function addToActiveNote(text) {
+  // Tracks roughly where the user last left the caret while actually editing
+  // the Journal tab (see the selectionchange listener near initNotesEditor),
+  // as the index of the top-level block (paragraph/list item/heading...) it
+  // was in. "Add to Journal" inserts right after that same block, so entries
+  // land wherever you were last writing instead of always at the very top -
+  // a character-exact caret position isn't tracked (the editor only shows one
+  // tab's content at a time, so there's nothing to track precisely once
+  // you've navigated away from Journal), but remembering the block is enough
+  // to keep new entries where you'd expect them.
+  var journalCaretBlockIndex = null;
+
+  // "Add to Journal" (search results, cross references, comments, Recent
+  // Activity, the selection menu...) always targets the one tab named
+  // "Journal", regardless of whichever tab is currently open - switches to
+  // it and scrolls to the new entry afterward so it's obvious it landed.
+  function addToJournal(text) {
     if (!text) return;
-    var tab = getActiveNotesTab();
-    if (!tab) return;
+    var tab = getOrCreateJournalTab();
     ensureTodaysDateBlock(tab);
-    var blockquoteEnd = tab.content.indexOf("</blockquote>");
-    var anchorIndex = blockquoteEnd === -1 ? 0 : blockquoteEnd + "</blockquote>".length;
-    insertBulletInto(tab, text, anchorIndex);
+    var anchorIndex = journalInsertIndex(tab);
+    var inserted = insertBulletInto(tab, text, anchorIndex);
+    showToast("Added to Journal");
+    focusJournalEntry(tab.id, inserted);
   }
+
+  // Turns journalCaretBlockIndex into a character offset into tab.content,
+  // by re-serializing the blocks up to and including that index through a
+  // scratch element (round-tripping the whole tab through the same
+  // innerHTML parsing keeps offsets consistent with the string that gets
+  // stored). Falls back to just after today's gratitude box when there's no
+  // tracked position yet, or it's stale (e.g. the tab was otherwise edited).
+  function journalInsertIndex(tab) {
+    var fallback = function () {
+      var blockquoteEnd = tab.content.indexOf("</blockquote>");
+      return blockquoteEnd === -1 ? 0 : blockquoteEnd + "</blockquote>".length;
+    };
+    if (journalCaretBlockIndex === null) return fallback();
+    var scratch = document.createElement("div");
+    scratch.innerHTML = tab.content;
+    var idx = Math.min(journalCaretBlockIndex, scratch.children.length - 1);
+    if (idx < 0) return fallback();
+    var cumulative = "";
+    for (var i = 0; i <= idx; i++) cumulative += scratch.children[i].outerHTML;
+    tab.content = scratch.innerHTML;
+    return cumulative.length;
+  }
+
+  function focusJournalEntry(journalTabId, text) {
+    switchNotesTab(journalTabId);
+    scrollToColumn("col-notes");
+    if (!text) return;
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        if (!notesEditor) return;
+        var editableRoot = notesEditor.ui.getEditableElement();
+        if (!editableRoot) return;
+        var entry = Array.prototype.find.call(editableRoot.querySelectorAll("li"), function (li) {
+          return li.textContent.trim() === text;
+        });
+        if (!entry) return;
+        entry.scrollIntoView({ block: "center" });
+        entry.classList.add("verse-flash");
+        setTimeout(function () { entry.classList.remove("verse-flash"); }, 1600);
+      });
+    });
+  }
+
+  // Keeps journalCaretBlockIndex current while the Journal tab is the one
+  // actually loaded in the editor. Native selectionchange (rather than
+  // CKEditor's own selection events) matches how getActiveNoteSelectionText
+  // already reads the caret elsewhere in this file.
+  document.addEventListener("selectionchange", function () {
+    if (!notesEditor) return;
+    var tab = getActiveNotesTab();
+    if (!isJournalTab(tab)) return;
+    var editableRoot = notesEditor.ui.getEditableElement();
+    var sel = window.getSelection();
+    if (!editableRoot || !sel || !sel.anchorNode || !editableRoot.contains(sel.anchorNode)) return;
+    var el = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+    var block = el;
+    while (block && block.parentElement !== editableRoot) block = block.parentElement;
+    if (!block) return;
+    var idx = Array.prototype.indexOf.call(editableRoot.children, block);
+    if (idx !== -1) journalCaretBlockIndex = idx;
+  });
 
   function loadNotesTabs() {
     try {
@@ -2941,6 +3082,18 @@
     return [{ id: "tab-" + Date.now(), name: "Notes", content: legacyContent || "<p></p>" }];
   }
   var notesTabs = loadNotesTabs();
+  // One-time migration: the dated-journal feature used to live in a tab
+  // literally named "Daily Journal" - fold it into the "Journal" tab that
+  // Add to Journal now always targets, instead of starting a second, empty
+  // one and orphaning everything already written.
+  (function migrateDailyJournalTab() {
+    if (notesTabs.some(isJournalTab)) return;
+    var legacy = notesTabs.filter(function (t) { return t.name === "Daily Journal"; })[0];
+    if (legacy) {
+      legacy.name = JOURNAL_TAB_NAME;
+      localStorage.setItem(NOTES_TABS_KEY, JSON.stringify(notesTabs));
+    }
+  })();
   var activeNotesTabId = localStorage.getItem(NOTES_ACTIVE_TAB_KEY);
   if (!notesTabs.some(function (t) { return t.id === activeNotesTabId; })) {
     activeNotesTabId = notesTabs[0].id;
