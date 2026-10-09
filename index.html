@@ -3200,13 +3200,15 @@
   // Stamps today's date + gratitude box at the top of the Journal tab only,
   // unless it's already there - safe to call every time the tab is shown.
   // Other tabs (Overview, Prayer List, any custom note) never get this.
+  // Returns true if it just stamped (i.e. tab.content changed).
   function ensureTodaysDateBlock(tab) {
-    if (!tab || !isJournalTab(tab)) return;
+    if (!tab || !isJournalTab(tab)) return false;
     var headingHtml = todaysHeadingHtml();
-    if (tab.content.indexOf(headingHtml) === 0) return;
+    if (tab.content.indexOf(headingHtml) === 0) return false;
     var newBlock = headingHtml + GRATITUDE_HTML;
     tab.content = tab.content ? newBlock + "<p>&nbsp;</p>" + tab.content : newBlock;
     saveNotesTabs();
+    return true;
   }
 
   function getOrCreateOverviewTab() {
@@ -3287,6 +3289,8 @@
       var li = block.children[journalCaretListItemIndex];
       if (li) {
         li.insertAdjacentElement("afterend", newLi);
+        // The next add goes after this one, not back above it.
+        journalCaretListItemIndex = Array.prototype.indexOf.call(block.children, newLi);
         tab.content = scratch.innerHTML;
         saveNotesTabs();
         if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
@@ -3303,25 +3307,79 @@
     } else {
       scratch.insertBefore(newUl, scratch.firstChild);
     }
+    journalCaretBlockIndex = Array.prototype.indexOf.call(scratch.children, newUl);
+    journalCaretListItemIndex = 0;
     tab.content = scratch.innerHTML;
     saveNotesTabs();
     if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
   }
 
+  // Every "Add to Journal" goes through here. Always targets the one tab named
+  // "Journal", regardless of whichever tab is currently open.
+  //
+  // When the Journal is the tab loaded in the editor, the entry is inserted
+  // through the editor itself, right after the line the caret is on - the
+  // editor keeps its caret position even while you're tapping around in Read
+  // or Search, so that's genuinely "where the caret is/was". The caret then
+  // moves to the end of the new entry, so several adds in a row land in
+  // order, each after the last. Going through the editor also makes the
+  // insert undoable like any other edit.
+  //
+  // Otherwise (another tab is open, or the editor hasn't loaded yet), the
+  // last line the caret was on in the Journal (journalCaretBlockIndex) is the
+  // best there is, applied to the stored HTML by fallbackInsert.
+  function insertIntoJournal(html, matchText, fallbackInsert) {
+    var tab = getOrCreateJournalTab();
+    var editorShowsJournal = !!notesEditor && tab.id === activeNotesTabId;
+    if (editorShowsJournal) saveActiveNotesTabContent(); // flush any just-typed text first
+    var stamped = ensureTodaysDateBlock(tab);
+    if (editorShowsJournal) {
+      if (stamped) notesEditor.setData(tab.content);
+      insertAtEditorCaret(html);
+      saveActiveNotesTabContent();
+    } else {
+      fallbackInsert(tab);
+    }
+    showToast("Added to Journal");
+    focusJournalEntry(tab.id, matchText);
+  }
+
+  // Inserts html into the editor right after the top-level block holding the
+  // caret (a whole quote bubble if the caret's inside one, otherwise the
+  // paragraph or list item it's on), then puts the caret at the end of what
+  // was inserted.
+  function insertAtEditorCaret(html) {
+    var editor = notesEditor;
+    var model = editor.model;
+    var fragment = editor.data.toModel(editor.data.processor.toView(html));
+    model.change(function (writer) {
+      var root = model.document.getRoot();
+      var pos = model.document.selection.getLastPosition();
+      var block = pos ? pos.parent : null;
+      while (block && block.parent && block.parent !== root) block = block.parent;
+      var insertPos = (block && block !== root)
+        ? writer.createPositionAfter(block)
+        : writer.createPositionAt(root, "end");
+      var range = model.insertContent(fragment, insertPos);
+      var target = range.end.nodeBefore;
+      while (target && target.is("element") && !model.schema.checkChild(target, "$text") && target.childCount) {
+        target = target.getChild(target.childCount - 1);
+      }
+      if (target && target.is("element") && model.schema.checkChild(target, "$text")) {
+        writer.setSelection(target, "end");
+      }
+    });
+  }
+
   // "Add to Journal" for a plain line of text (currently just the Recent
   // Activity "+" button, e.g. "Highlighted Romans 1:17") - a short activity
   // description, not scripture, so it's a plain bullet rather than the quote
-  // bubble addScriptureToJournal/addCommentToJournal use. Always targets the
-  // one tab named "Journal", regardless of whichever tab is currently open -
-  // switches to it and scrolls to the new entry afterward so it's obvious it
-  // landed.
+  // bubble addScriptureToJournal/addCommentToJournal use.
   function addToJournal(text) {
     if (!text) return;
-    var tab = getOrCreateJournalTab();
-    ensureTodaysDateBlock(tab);
-    insertAtJournalCaret(tab, escapeHtml(text));
-    showToast("Added to Journal");
-    focusJournalEntry(tab.id, text);
+    insertIntoJournal("<ul><li>" + escapeHtml(text) + "</li></ul>", text, function (tab) {
+      insertAtJournalCaret(tab, escapeHtml(text));
+    });
   }
 
   // Builds a quote bubble for a verse, styled the same as the daily gratitude
@@ -3356,6 +3414,9 @@
     } else {
       scratch.insertBefore(bubbleEl, scratch.firstChild);
     }
+    // The next add goes after this one, not back above it.
+    journalCaretBlockIndex = Array.prototype.indexOf.call(scratch.children, bubbleEl);
+    journalCaretListItemIndex = null;
     tab.content = scratch.innerHTML;
     saveNotesTabs();
     if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
@@ -3365,11 +3426,10 @@
   // to Journal" - a verse quote on its own, in a bubble like the gratitude box.
   function addScriptureToJournal(text) {
     if (!text) return;
-    var tab = getOrCreateJournalTab();
-    ensureTodaysDateBlock(tab);
-    insertBubbleAtJournalCaret(tab, buildScriptureBubble(text, null));
-    showToast("Added to Journal");
-    focusJournalEntry(tab.id, text);
+    var bubble = buildScriptureBubble(text, null);
+    insertIntoJournal(bubble.outerHTML, text, function (tab) {
+      insertBubbleAtJournalCaret(tab, bubble);
+    });
   }
 
   // Used when closing the verse comment box (see closeCommentEditor) - the
@@ -3379,14 +3439,19 @@
     if (!ref || !commentText) return;
     var verseText = lookupVerseText(ref) || "";
     var verseLine = ref.book + " " + ref.chapter + ":" + ref.verse + (verseText ? " — " + verseText : "");
-    var tab = getOrCreateJournalTab();
-    ensureTodaysDateBlock(tab);
-    insertBubbleAtJournalCaret(tab, buildScriptureBubble(verseLine, commentText));
-    showToast("Added to Journal");
-    focusJournalEntry(tab.id, verseLine + commentText);
+    var bubble = buildScriptureBubble(verseLine, commentText);
+    insertIntoJournal(bubble.outerHTML, verseLine + commentText, function (tab) {
+      insertBubbleAtJournalCaret(tab, bubble);
+    });
   }
 
+  // After an add: closes the search overlay if it was added from there, shows
+  // the Journal tab, then scrolls to, flashes, and puts the caret at the end
+  // of the new entry. The editor is only given keyboard focus on desktop -
+  // on a phone that would pop the on-screen keyboard up over what you just
+  // added.
   function focusJournalEntry(journalTabId, text) {
+    closeSearchOverlay();
     switchNotesTab(journalTabId);
     scrollToColumn("col-notes", true);
     if (!text) return;
@@ -3399,11 +3464,36 @@
           return el.textContent.trim() === text;
         });
         if (!entry) return;
+        placeEditorCaretAtEndOf(entry);
+        trackJournalCaretFromNode(entry);
+        if (isDesktopColumns()) notesEditor.editing.view.focus();
         entry.scrollIntoView({ block: "center" });
         entry.classList.add("verse-flash");
         setTimeout(function () { entry.classList.remove("verse-flash"); }, 1600);
       });
     });
+  }
+
+  // Moves the editor's caret to the end of the last text block inside a DOM
+  // element of the editable (e.g. a just-inserted bubble's comment bullet).
+  function placeEditorCaretAtEndOf(domEl) {
+    var editor = notesEditor;
+    // A list's <li> isn't itself mapped to a model element (its inner
+    // paragraph is), so take the last mapped element at or inside domEl.
+    var candidates = [domEl].concat(Array.prototype.slice.call(domEl.querySelectorAll("*"))).reverse();
+    var modelEl = null;
+    for (var i = 0; i < candidates.length && !modelEl; i++) {
+      var viewEl = editor.editing.view.domConverter.mapDomToView(candidates[i]);
+      modelEl = viewEl && viewEl.is && viewEl.is("element") ? editor.editing.mapper.toModelElement(viewEl) : null;
+    }
+    if (!modelEl) return;
+    var model = editor.model;
+    var target = modelEl;
+    while (target && target.is("element") && !model.schema.checkChild(target, "$text") && target.childCount) {
+      target = target.getChild(target.childCount - 1);
+    }
+    if (!target || !target.is("element") || !model.schema.checkChild(target, "$text")) return;
+    model.change(function (writer) { writer.setSelection(target, "end"); });
   }
 
   // Keeps journalCaretBlockIndex/journalCaretListItemIndex current while the
@@ -3413,12 +3503,15 @@
   // file.
   document.addEventListener("selectionchange", function () {
     if (!notesEditor) return;
-    var tab = getActiveNotesTab();
-    if (!isJournalTab(tab)) return;
-    var editableRoot = notesEditor.ui.getEditableElement();
+    if (!isJournalTab(getActiveNotesTab())) return;
     var sel = window.getSelection();
-    if (!editableRoot || !sel || !sel.anchorNode || !editableRoot.contains(sel.anchorNode)) return;
-    var el = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+    if (sel && sel.anchorNode) trackJournalCaretFromNode(sel.anchorNode);
+  });
+
+  function trackJournalCaretFromNode(node) {
+    var editableRoot = notesEditor && notesEditor.ui.getEditableElement();
+    if (!editableRoot || !node || !editableRoot.contains(node)) return;
+    var el = node.nodeType === 1 ? node : node.parentElement;
     var li = el.closest ? el.closest("li") : null;
     var block = el;
     while (block && block.parentElement !== editableRoot) block = block.parentElement;
@@ -3429,7 +3522,7 @@
     journalCaretListItemIndex = (li && li.parentElement === block)
       ? Array.prototype.indexOf.call(block.children, li)
       : null;
-  });
+  }
 
   function loadNotesTabs() {
     try {
