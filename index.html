@@ -37,7 +37,6 @@
     --line: #c9d3de;
     --accent: #2f5fd0;
     --highlight: #fff3a0;
-    --gratitude-bg: #e2e6eb;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -48,7 +47,6 @@
       --line: #334155;
       --accent: #7ea2ff;
       --highlight: #6b5d1f;
-      --gratitude-bg: #2a3441;
     }
   }
   * { box-sizing: border-box; }
@@ -175,6 +173,16 @@
   #col-activity { order: 3; }
 
   /* ---------- Notes column (CKEditor 5) ---------- */
+  /* Stays visible while scrolling a long note, same idea as Read's .nav-bar -
+     an opaque background is needed since this sits on top of scrolled
+     content once stuck, not beside it. */
+  .notes-sticky-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg);
+    padding-bottom: 0.5rem;
+  }
   .notes-toolbar-row {
     display: flex;
     flex-wrap: wrap;
@@ -801,7 +809,7 @@
     border: 1px solid var(--line);
     border-left: 3px solid var(--accent);
     border-radius: 8px;
-    background: var(--gratitude-bg);
+    background: var(--panel);
     color: var(--ink) !important;
     font-style: italic !important;
   }
@@ -870,8 +878,10 @@
     <section class="column" id="col-notes">
       <div class="column-pad">
         <h1>Notes</h1>
-        <div id="notes-tab-bar" class="notes-tab-bar"></div>
-        <div id="notes-toolbar" class="notes-toolbar-row"></div>
+        <div class="notes-sticky-header">
+          <div id="notes-tab-bar" class="notes-tab-bar"></div>
+          <div id="notes-toolbar" class="notes-toolbar-row"></div>
+        </div>
         <div id="notes-editor-wrap" class="panel">
           <div id="notes-editor"></div>
         </div>
@@ -1319,11 +1329,8 @@
   // straight to the one after it - cap any single swipe/drag to moving at
   // most one column from wherever it started.
   var swipeStartColIndex = null;
-  var swipeStartX = null;
-  columnsWrap.addEventListener("touchstart", function (e) {
+  columnsWrap.addEventListener("touchstart", function () {
     swipeStartColIndex = currentColumnIndex();
-    var touch = e.touches && e.touches[0];
-    swipeStartX = touch ? touch.clientX : null;
   }, { passive: true });
   var scrollSettleTimer = null;
   columnsWrap.addEventListener("scroll", function () {
@@ -1342,34 +1349,11 @@
     }, 120);
   }, { passive: true });
 
-  // Infinite swipe: continuing to swipe past the last column wraps to the
-  // first (and vice versa), rather than just stopping dead at the edge.
-  // There's nothing to scroll to there natively, so no "scroll" event fires
-  // for the gesture in that direction - this has to act on touchend directly
-  // instead of through the scroll-settle clamp above.
-  var SWIPE_WRAP_THRESHOLD = 40;
-  columnsWrap.addEventListener("touchend", function (e) {
-    if (swipeStartColIndex === null || swipeStartX === null) return;
-    var touch = e.changedTouches && e.changedTouches[0];
-    if (!touch) return;
-    var deltaX = touch.clientX - swipeStartX;
-    var ids = getColumnIds();
-    var startIdx = swipeStartColIndex;
-    // Instant (not smooth): a smooth scroll from one end to the other would
-    // continuously animate across the whole scroll range in between,
-    // visibly passing over Bible in the middle the whole way there even
-    // though it only ever actually stops on Notes/Search - this makes it a
-    // single direct jump instead, as if they sat right next to each other.
-    if (startIdx === 0 && deltaX > SWIPE_WRAP_THRESHOLD) {
-      swipeStartColIndex = null;
-      scrollToColumn(ids[ids.length - 1], true);
-    } else if (startIdx === ids.length - 1 && deltaX < -SWIPE_WRAP_THRESHOLD) {
-      swipeStartColIndex = null;
-      scrollToColumn(ids[0], true);
-    }
-  }, { passive: true });
-
   function goToVerseInRead(book, chapter, verse) {
+    // Following any verse hyperlink (a search result, cross reference, Recent
+    // Activity row...) should show you Read, so close the search overlay if
+    // that's where the link was clicked from - harmless no-op otherwise.
+    closeSearchOverlay();
     // Instant, not smooth - an animated scroll here can still be mid-flight
     // when the vertical scrollIntoView below fires a couple of frames later,
     // which on some mobile browsers (especially combined with this pager's
@@ -1500,23 +1484,29 @@
       var entryEl = document.createElement("div");
       entryEl.className = "xref-entry";
 
-      var label = document.createElement("a");
-      label.className = "xref-entry-label";
-      label.href = "#";
-      label.textContent = formatXrefLabel(sb, sc, sv, eb, ec, ev);
-      label.addEventListener("click", function (e2) { e2.preventDefault(); goToVerseInRead(sb, sc, sv); });
-      entryEl.appendChild(label);
-
       var verses = collectRangeVerses(sb, sc, sv, eb, ec, ev);
-      if (verses.length) {
-        verses.forEach(function (v) {
-          entryEl.appendChild(buildVerseLine(v.book, v.chapter, v.verse, v.text));
-        });
+      if (verses.length === 1) {
+        // A single verse's own ref+text (from buildVerseLine) is already the
+        // complete, clickable reference - a separate range label here would
+        // just repeat the same "Book C:V" immediately before it.
+        entryEl.appendChild(buildVerseLine(verses[0].book, verses[0].chapter, verses[0].verse, verses[0].text));
       } else {
-        var unavailable = document.createElement("span");
-        unavailable.className = "result-verse";
-        unavailable.textContent = "(verse text unavailable)";
-        entryEl.appendChild(unavailable);
+        var label = document.createElement("a");
+        label.className = "xref-entry-label";
+        label.href = "#";
+        label.textContent = formatXrefLabel(sb, sc, sv, eb, ec, ev);
+        label.addEventListener("click", function (e2) { e2.preventDefault(); goToVerseInRead(sb, sc, sv); });
+        entryEl.appendChild(label);
+        if (verses.length) {
+          verses.forEach(function (v) {
+            entryEl.appendChild(buildVerseLine(v.book, v.chapter, v.verse, v.text));
+          });
+        } else {
+          var unavailable = document.createElement("span");
+          unavailable.className = "result-verse";
+          unavailable.textContent = "(verse text unavailable)";
+          entryEl.appendChild(unavailable);
+        }
       }
       container.appendChild(entryEl);
     });
@@ -2891,15 +2881,55 @@
   }
 
   // Tracks roughly where the user last left the caret while actually editing
-  // the Journal tab (see the selectionchange listener near initNotesEditor),
-  // as the index of the top-level block (paragraph/list item/heading...) it
-  // was in. "Add to Journal" inserts right after that same block, so entries
-  // land wherever you were last writing instead of always at the very top -
-  // a character-exact caret position isn't tracked (the editor only shows one
+  // the Journal tab (see the selectionchange listener near initNotesEditor):
+  // the index of the top-level block (paragraph/list item/heading...) it was
+  // in, and - if that block is a list - which <li> specifically. "Add to
+  // Journal" inserts right after that exact line, so entries land wherever
+  // you were last writing instead of always at the very top. A character-
+  // exact position within a line isn't tracked (the editor only shows one
   // tab's content at a time, so there's nothing to track precisely once
-  // you've navigated away from Journal), but remembering the block is enough
-  // to keep new entries where you'd expect them.
+  // you've navigated away from Journal), but the specific line is.
   var journalCaretBlockIndex = null;
+  var journalCaretListItemIndex = null;
+
+  // Inserts a new <li> (built from liInnerHtml, already escaped/safe) into
+  // the Journal tab right after the exact line the caret was last in -
+  // working on a live DOM copy rather than splicing HTML strings, since the
+  // caret's line can be a specific <li> nested inside a <ul>, not just a
+  // top-level block. Falls back to right after today's gratitude box when
+  // there's no tracked position, or it no longer resolves (e.g. the tab was
+  // otherwise edited since).
+  function insertAtJournalCaret(tab, liInnerHtml) {
+    var scratch = document.createElement("div");
+    scratch.innerHTML = tab.content;
+    var newLi = document.createElement("li");
+    newLi.innerHTML = liInnerHtml;
+
+    var block = journalCaretBlockIndex !== null ? scratch.children[journalCaretBlockIndex] : null;
+    if (block && (block.tagName === "UL" || block.tagName === "OL") && journalCaretListItemIndex !== null) {
+      var li = block.children[journalCaretListItemIndex];
+      if (li) {
+        li.insertAdjacentElement("afterend", newLi);
+        tab.content = scratch.innerHTML;
+        saveNotesTabs();
+        if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
+        return;
+      }
+      block = null; // that line's gone - fall through to the block/fallback case
+    }
+
+    var anchor = block || scratch.querySelector("blockquote");
+    var newUl = document.createElement("ul");
+    newUl.appendChild(newLi);
+    if (anchor) {
+      anchor.insertAdjacentElement("afterend", newUl);
+    } else {
+      scratch.insertBefore(newUl, scratch.firstChild);
+    }
+    tab.content = scratch.innerHTML;
+    saveNotesTabs();
+    if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
+  }
 
   // "Add to Journal" (search results, cross references, comments, Recent
   // Activity, the selection menu...) always targets the one tab named
@@ -2909,10 +2939,9 @@
     if (!text) return;
     var tab = getOrCreateJournalTab();
     ensureTodaysDateBlock(tab);
-    var anchorIndex = journalInsertIndex(tab);
-    var inserted = insertBulletInto(tab, text, anchorIndex);
+    insertAtJournalCaret(tab, escapeHtml(text));
     showToast("Added to Journal");
-    focusJournalEntry(tab.id, inserted);
+    focusJournalEntry(tab.id, text);
   }
 
   // Used when closing the verse comment box (see closeCommentEditor) - the
@@ -2924,40 +2953,9 @@
     var verseLine = ref.book + " " + ref.chapter + ":" + ref.verse + (verseText ? " — " + verseText : "");
     var tab = getOrCreateJournalTab();
     ensureTodaysDateBlock(tab);
-    var anchorIndex = journalInsertIndex(tab);
-    var bulletHtml = "<li>" + escapeHtml(verseLine) + "<br>" + escapeHtml(commentText) + "</li>";
-    var before = tab.content.slice(0, anchorIndex);
-    var after = tab.content.slice(anchorIndex);
-    var ulOpenTag = after.match(/^\s*<ul[^>]*>/i);
-    tab.content = ulOpenTag
-      ? before + after.slice(0, ulOpenTag[0].length) + bulletHtml + after.slice(ulOpenTag[0].length)
-      : before + "<ul>" + bulletHtml + "</ul>" + after;
-    saveNotesTabs();
-    if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
+    insertAtJournalCaret(tab, escapeHtml(verseLine) + "<br>" + escapeHtml(commentText));
     showToast("Added to Journal");
     focusJournalEntry(tab.id, verseLine + commentText);
-  }
-
-  // Turns journalCaretBlockIndex into a character offset into tab.content,
-  // by re-serializing the blocks up to and including that index through a
-  // scratch element (round-tripping the whole tab through the same
-  // innerHTML parsing keeps offsets consistent with the string that gets
-  // stored). Falls back to just after today's gratitude box when there's no
-  // tracked position yet, or it's stale (e.g. the tab was otherwise edited).
-  function journalInsertIndex(tab) {
-    var fallback = function () {
-      var blockquoteEnd = tab.content.indexOf("</blockquote>");
-      return blockquoteEnd === -1 ? 0 : blockquoteEnd + "</blockquote>".length;
-    };
-    if (journalCaretBlockIndex === null) return fallback();
-    var scratch = document.createElement("div");
-    scratch.innerHTML = tab.content;
-    var idx = Math.min(journalCaretBlockIndex, scratch.children.length - 1);
-    if (idx < 0) return fallback();
-    var cumulative = "";
-    for (var i = 0; i <= idx; i++) cumulative += scratch.children[i].outerHTML;
-    tab.content = scratch.innerHTML;
-    return cumulative.length;
   }
 
   function focusJournalEntry(journalTabId, text) {
@@ -2980,10 +2978,11 @@
     });
   }
 
-  // Keeps journalCaretBlockIndex current while the Journal tab is the one
-  // actually loaded in the editor. Native selectionchange (rather than
-  // CKEditor's own selection events) matches how getActiveNoteSelectionText
-  // already reads the caret elsewhere in this file.
+  // Keeps journalCaretBlockIndex/journalCaretListItemIndex current while the
+  // Journal tab is the one actually loaded in the editor. Native
+  // selectionchange (rather than CKEditor's own selection events) matches
+  // how getActiveNoteSelectionText already reads the caret elsewhere in this
+  // file.
   document.addEventListener("selectionchange", function () {
     if (!notesEditor) return;
     var tab = getActiveNotesTab();
@@ -2992,11 +2991,16 @@
     var sel = window.getSelection();
     if (!editableRoot || !sel || !sel.anchorNode || !editableRoot.contains(sel.anchorNode)) return;
     var el = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+    var li = el.closest ? el.closest("li") : null;
     var block = el;
     while (block && block.parentElement !== editableRoot) block = block.parentElement;
     if (!block) return;
     var idx = Array.prototype.indexOf.call(editableRoot.children, block);
-    if (idx !== -1) journalCaretBlockIndex = idx;
+    if (idx === -1) return;
+    journalCaretBlockIndex = idx;
+    journalCaretListItemIndex = (li && li.parentElement === block)
+      ? Array.prototype.indexOf.call(block.children, li)
+      : null;
   });
 
   function loadNotesTabs() {
