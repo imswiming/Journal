@@ -3283,26 +3283,15 @@
       notesEditor.execute("redo");
       notesEditor.editing.view.focus();
     });
-    makeBtn("☑ Checklist", "Turn the selected (or current) lines into a checklist", function () {
-      if (!notesEditor) return;
-      notesEditor.execute("todoList");
-      notesEditor.editing.view.focus();
-    });
-    makeBtn("T• Title", "Make the selected (or current) lines a bold title", function () {
-      if (!notesEditor) return;
-      var isTitle = notesEditor.commands.get("heading").value === "heading4";
-      notesEditor.execute(isTitle ? "paragraph" : "heading", isTitle ? undefined : { value: "heading4" });
-      notesEditor.editing.view.focus();
-    });
-    makeBtn("✏️ Highlight", "Highlight the selected text in yellow", function () {
+    makeBtn("✏️", "Highlight the selected text in yellow", function () {
       if (!notesEditor) return;
       var isHighlighted = notesEditor.commands.get("highlight").value === "yellowMarker";
       notesEditor.execute("highlight", { value: isHighlighted ? null : "yellowMarker" });
       notesEditor.editing.view.focus();
     });
-    makeBtn("⇤ Outdent", "Decrease indent", outdentNotesLine);
-    makeBtn("⇥ Indent", "Increase indent", indentNotesLine);
-    makeBtn("Overview", "Add the selected text (or current line) to the Overview note", function () {
+    makeBtn("⇤", "Decrease indent", outdentNotesLine);
+    makeBtn("⇥", "Increase indent", indentNotesLine);
+    makeBtn("📌", "Add the selected text (or current line) to the Overview note", function () {
       var text = getActiveNoteSelectionText();
       if (text) addOverviewEntry(text);
     });
