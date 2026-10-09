@@ -2102,7 +2102,15 @@
     }
   }
 
-  function hideSelectionMenu() { selectionMenu.style.display = "none"; }
+  // Captured once, when the menu is shown (see checkSelectionForMenu), and
+  // reused by every button in it instead of each one re-deriving the verse
+  // from the live selection at click time. On mobile, tapping a menu button
+  // is itself a touch on a DIFFERENT element than the text, which can nudge
+  // or collapse the native selection before the click handler runs - re-
+  // deriving it there was occasionally landing on the wrong verse.
+  var selectionMenuRef = null;
+
+  function hideSelectionMenu() { selectionMenu.style.display = "none"; selectionMenuRef = null; }
   function positionSelectionMenu() { selectionMenu.style.display = "flex"; }
 
   function checkSelectionForMenu(clickX, clickY) {
@@ -2122,10 +2130,12 @@
     var range = sel.getRangeAt(0);
     var node = range.commonAncestorContainer;
     var el = node.nodeType === 1 ? node : node.parentElement;
-    if (!el || !textEl.contains(el) || !findSelectionVerseRef()) {
+    var ref = findSelectionVerseRef();
+    if (!el || !textEl.contains(el) || !ref) {
       hideSelectionMenu();
       return;
     }
+    selectionMenuRef = ref;
     if (sel.isCollapsed && hasCoords) {
       var flow = el.closest ? el.closest(".verse-flow") : null;
       var flowRect = flow && flow.getBoundingClientRect();
@@ -2223,7 +2233,7 @@
       hideSelectionMenu();
       return;
     }
-    var ref = findSelectionVerseRef();
+    var ref = selectionMenuRef;
     var range = sel.getRangeAt(0);
     var section = range.commonAncestorContainer;
     section = section.nodeType === 1 ? section.closest(".chapter-section") : section.parentElement.closest(".chapter-section");
@@ -2284,7 +2294,7 @@
 
   selectionHighlightVerseBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
   selectionHighlightVerseBtn.addEventListener("click", function () {
-    var ref = findSelectionVerseRef();
+    var ref = selectionMenuRef;
     hideSelectionMenu();
     if (!ref) return;
     var section = document.getElementById(sectionId(ref.book, ref.chapter));
@@ -2299,7 +2309,7 @@
 
   selectionReadBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
   selectionReadBtn.addEventListener("click", function () {
-    var ref = findSelectionVerseRef();
+    var ref = selectionMenuRef;
     hideSelectionMenu();
     window.getSelection().removeAllRanges();
     if (!ref) return;
@@ -2352,7 +2362,7 @@
   var viewBibleHubBtn = document.getElementById("view-biblehub");
   viewBibleHubBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
   viewBibleHubBtn.addEventListener("click", function () {
-    var ref = findSelectionVerseRef();
+    var ref = selectionMenuRef;
     hideSelectionMenu();
     window.getSelection().removeAllRanges();
     openBibleHubForRef(ref);
@@ -2427,7 +2437,7 @@
 
   viewXrefsBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
   viewXrefsBtn.addEventListener("click", function () {
-    var ref = findSelectionVerseRef();
+    var ref = selectionMenuRef;
     hideSelectionMenu();
     window.getSelection().removeAllRanges();
     openXrefsForRef(ref);
@@ -2449,7 +2459,7 @@
   var selectionOverviewBtn = document.getElementById("selection-overview-btn");
   selectionOverviewBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
   selectionOverviewBtn.addEventListener("click", function () {
-    var ref = findSelectionVerseRef();
+    var ref = selectionMenuRef;
     hideSelectionMenu();
     window.getSelection().removeAllRanges();
     addToJournal(formatVerseOverviewLine(ref));
