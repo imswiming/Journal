@@ -298,6 +298,7 @@
      swatch preview - the real background comes from this static class, reusing
      the same --highlight used for Bible verse highlights. */
   #notes-editor-wrap .ck.ck-content mark.marker-yellow { background-color: var(--highlight) !important; }
+  #notes-editor-wrap .ck.ck-content mark.marker-grey { background-color: var(--flash) !important; }
 
   @media (min-width: 1100px) {
     .column-tabs { display: none; }
@@ -3769,11 +3770,20 @@
     });
   }
 
+  // Verse text added to the Journal keeps the same light grey as the flash,
+  // permanently, so scripture stands out from what you wrote yourself. A
+  // book emoji follows it inside the same marked text, and is part of what
+  // focusJournalEntry matches on - hence JOURNAL_VERSE_TAIL on matchText.
+  var JOURNAL_VERSE_TAIL = " " + String.fromCharCode(0xD83D, 0xDCD6);
+  function journalVerseMark(text) {
+    return '<mark class="marker-grey">' + escapeHtml(text + JOURNAL_VERSE_TAIL) + "</mark>";
+  }
+
   // A verse on its own - search results, cross references, Recent Activity,
   // the selection menu's and highlight box's "Add to Journal".
   function addScriptureToJournal(text) {
     if (!text) return;
-    addBulletToJournal(escapeHtml(text), text);
+    addBulletToJournal(journalVerseMark(text), text + JOURNAL_VERSE_TAIL);
   }
 
   // A verse with a comment typed on it (see closeCommentEditor and the
@@ -3784,8 +3794,8 @@
     var verseText = lookupVerseText(ref) || "";
     var verseLine = ref.book + " " + ref.chapter + ":" + ref.verse + (verseText ? " — " + verseText : "");
     addBulletToJournal(
-      escapeHtml(verseLine) + "<ul><li>" + escapeHtml(commentText) + "</li></ul>",
-      verseLine + commentText
+      journalVerseMark(verseLine) + "<ul><li>" + escapeHtml(commentText) + "</li></ul>",
+      verseLine + JOURNAL_VERSE_TAIL + commentText
     );
   }
 
@@ -4155,7 +4165,10 @@
       // option on/off rather than offering a color picker.
       highlight: {
         options: [
-          { model: "yellowMarker", class: "marker-yellow", title: "Yellow", color: "#ffee00", type: "marker" }
+          { model: "yellowMarker", class: "marker-yellow", title: "Yellow", color: "#ffee00", type: "marker" },
+          // Not on the toolbar button - only ever applied to the verse text
+          // that Add to Journal inserts (see journalVerseMark).
+          { model: "greyMarker", class: "marker-grey", title: "Grey", color: "#eef2f6", type: "marker" }
         ]
       },
       initialData: (function () { var tab = getActiveNotesTab(); ensureTodaysDateBlock(tab); return tab.content || "<p></p>"; })()
