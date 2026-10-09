@@ -184,14 +184,12 @@
   /* On mobile, Read's text runs on plain white edge to edge, rather than
      sitting in a bordered white card inset on the grey page background -
      more width for the text, and no grey frame around it. */
-  @media (max-width: 1099px) {
-    #col-read { background: var(--panel); }
-    #col-read #reader {
-      border: none;
-      border-radius: 0;
-      padding: 0;
-      background: transparent;
-    }
+  #col-read { background: var(--panel); }
+  #col-read #reader {
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
   }
 
   /* ---------- Notes column (CKEditor 5) ---------- */
