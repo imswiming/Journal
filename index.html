@@ -3701,6 +3701,21 @@
     return removed;
   }
 
+  // "Thank God for:" boxes stamped before they came with an empty bullet to
+  // type into get one now - only ones with nothing written in them, so
+  // nothing typed is ever touched. Returns true if it added any.
+  function upgradeEmptyGratitudeBoxes(tab) {
+    var body = parseHtmlBody(tab.content);
+    var changed = false;
+    Array.prototype.forEach.call(body.children, function (el) {
+      if (el.tagName !== "BLOCKQUOTE" || el.querySelector("ul, ol")) return;
+      if (el.textContent.replace(/\s+/g, " ").trim().toLowerCase() !== "thank god for:") return;
+      el.insertAdjacentHTML("beforeend", "<ul><li>&nbsp;</li></ul>");
+      changed = true;
+    });
+    if (changed) tab.content = body.innerHTML;
+    return changed;
+  }
   function isPrayerBubble(el) {
     return !!el && el.tagName === "BLOCKQUOTE" && /^\s*prayer requests/i.test(el.textContent || "");
   }
@@ -3736,6 +3751,7 @@
   function ensureTodaysDateBlock(tab) {
     if (!tab || !isJournalTab(tab)) return false;
     var cleaned = removeRedundantEmptyStamps(tab);
+    cleaned = upgradeEmptyGratitudeBoxes(tab) || cleaned;
     var changed = ensurePrayerBubble(tab) || cleaned;
     if (!hasTodaysHeading(tab)) {
       // Below the prayer bubble, above the older days.
