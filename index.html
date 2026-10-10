@@ -539,6 +539,7 @@
     cursor: pointer;
   }
   .next-book-btn:hover { background: var(--bg); }
+  .prev-book-nav { margin: 0.5rem 0 1rem; }
   .chapter-heading {
     font-family: "Figtree", sans-serif;
     font-weight: 700;
@@ -2248,6 +2249,12 @@
     return "ch-" + book.replace(/\s+/g, "_") + "-" + chapter;
   }
 
+  function prevBookWithData(book) {
+    for (var i = BOOKS_IN_ORDER.indexOf(book) - 1; i >= 0; i--) {
+      if (chapterNumbers(BOOKS_IN_ORDER[i]).length) return BOOKS_IN_ORDER[i];
+    }
+    return null;
+  }
   function nextBookWithData(book) {
     var bookIdx = BOOKS_IN_ORDER.indexOf(book);
     for (var i = bookIdx + 1; i < BOOKS_IN_ORDER.length; i++) {
@@ -2271,7 +2278,12 @@
     if (!nivData[book]) return;
     currentRenderedBook = book;
     ALL_CHAPTERS = [];
-    var html = '<h2 class="book-heading">' + book + '</h2>';
+    var html = "";
+    var prevBook = prevBookWithData(book);
+    if (prevBook) {
+      html += '<div class="next-book-nav prev-book-nav"><button type="button" class="next-book-btn" data-next-book="' + prevBook + '">← Back to ' + prevBook + '</button></div>';
+    }
+    html += '<h2 class="book-heading">' + book + '</h2>';
     chapterNumbers(book).forEach(function (chapter) {
       ALL_CHAPTERS.push({ book: book, chapter: chapter });
       var key = highlightKey(book, chapter);
@@ -2429,7 +2441,12 @@
       // instead. Jumping to a book should show its title.
       if (chapterNumbers(book)[0] === chapter) {
         var prev = sectionEl.previousElementSibling;
-        if (prev && prev.classList.contains("book-heading")) scrollTarget = prev;
+        if (prev && prev.classList.contains("book-heading")) {
+          scrollTarget = prev;
+          // ...and the Back button sitting above it, when there is one.
+          var above = prev.previousElementSibling;
+          if (above && above.classList.contains("prev-book-nav")) scrollTarget = above;
+        }
       }
       scrollTarget.scrollIntoView({ behavior: "auto", block: "start" });
       requestAnimationFrame(function () {
@@ -3575,6 +3592,10 @@
   // ============================================================
   var OVERVIEW_TAB_NAME = "Overview";
   var JOURNAL_TAB_NAME = "Journal";
+  // The Journal's first block is always this "Prayer requests:" bubble - a
+  // checklist, so requests can be ticked off - and each new day's date +
+  // gratitude box is stamped directly below it (see ensureTodaysDateBlock).
+  var PRAYER_HTML = '<blockquote><p>Prayer requests:</p><ul class="todo-list"><li><label class="todo-list__label"><input type="checkbox" disabled="disabled"><span class="todo-list__label__description">&nbsp;</span></label></li></ul></blockquote>';
   var GRATITUDE_HTML = "<blockquote><p><i>Thank God for:</i></p><ul><li>&nbsp;</li></ul></blockquote>";
   function isOverviewTab(tab) { return !!tab && tab.name === OVERVIEW_TAB_NAME; }
   function isJournalTab(tab) { return !!tab && tab.name === JOURNAL_TAB_NAME; }
@@ -3680,6 +3701,34 @@
     return removed;
   }
 
+  function isPrayerBubble(el) {
+    return !!el && el.tagName === "BLOCKQUOTE" && /^\s*prayer requests/i.test(el.textContent || "");
+  }
+  function prayerBubbleHasContent(el) {
+    return !!(el.textContent || "").replace(/^\s*prayer requests:?/i, "").replace(/\s+/g, " ").trim();
+  }
+  // Makes sure the Journal's very first block is the prayer bubble: adds it if
+  // it's missing, moves it up if something has ended up above it, and drops
+  // extra empty copies (two devices can each add one). A copy with something
+  // written in it is never removed. Returns true if tab.content changed.
+  function ensurePrayerBubble(tab) {
+    var body = parseHtmlBody(tab.content);
+    var bubbles = Array.prototype.filter.call(body.children, isPrayerBubble);
+    var keep = bubbles.filter(prayerBubbleHasContent)[0] || bubbles[0] || null;
+    var changed = false;
+    bubbles.forEach(function (b) {
+      if (b !== keep && !prayerBubbleHasContent(b)) { b.remove(); changed = true; }
+    });
+    if (keep) {
+      if (body.firstElementChild !== keep || body.firstChild !== keep) { body.insertBefore(keep, body.firstChild); changed = true; }
+    } else {
+      body.insertAdjacentHTML("afterbegin", PRAYER_HTML);
+      changed = true;
+    }
+    if (changed) tab.content = body.innerHTML;
+    return changed;
+  }
+
   // Stamps today's date + gratitude box at the top of the Journal tab only,
   // unless today already has one anywhere in it - safe to call every time the
   // tab is shown. Other tabs (Overview, Prayer List, any custom note) never
@@ -3687,10 +3736,13 @@
   function ensureTodaysDateBlock(tab) {
     if (!tab || !isJournalTab(tab)) return false;
     var cleaned = removeRedundantEmptyStamps(tab);
-    var changed = cleaned;
+    var changed = ensurePrayerBubble(tab) || cleaned;
     if (!hasTodaysHeading(tab)) {
-      var newBlock = todaysHeadingHtml() + GRATITUDE_HTML;
-      tab.content = tab.content ? newBlock + "<p>&nbsp;</p>" + tab.content : newBlock;
+      // Below the prayer bubble, above the older days.
+      var body = parseHtmlBody(tab.content);
+      var rest = body.children.length > 1 ? "<p>&nbsp;</p>" : "";
+      body.firstElementChild.insertAdjacentHTML("afterend", todaysHeadingHtml() + GRATITUDE_HTML + rest);
+      tab.content = body.innerHTML;
       changed = true;
     }
     if (changed) saveNotesTabs();
@@ -4299,6 +4351,25 @@
       // buttons above instead, so editor.ui.view.toolbar.element is
       // deliberately never inserted into the page.
       notesEditor = editor;
+      // Every bullet in the Journal's prayer bubble is a checklist item,
+      // whichever way it got there (typed, pasted, synced, undone...).
+      editor.model.document.registerPostFixer(function (writer) {
+        var changed = false;
+        var root = editor.model.document.getRoot();
+        for (var i = 0; i < root.childCount; i++) {
+          var quote = root.getChild(i);
+          if (!quote.is("element", "blockQuote") || !quote.childCount) continue;
+          var heading = "";
+          Array.from(quote.getChild(0).getChildren()).forEach(function (n) { if (n.is("$text")) heading += n.data; });
+          if (!/^\s*prayer requests/i.test(heading)) continue;
+          for (var j = 0; j < quote.childCount; j++) {
+            var item = quote.getChild(j);
+            var type = item.getAttribute("listType");
+            if (type && type !== "todo") { writer.setAttribute("listType", "todo", item); changed = true; }
+          }
+        }
+        return changed;
+      });
       document.querySelectorAll("#notes-toolbar .notes-toolbar-btn").forEach(function (b) { b.disabled = false; });
 
       // Tab/Shift+Tab indent/outdent the current line - same commands as the
@@ -4544,7 +4615,7 @@
   function isTrivialNoteTab(tab) {
     var body = parseHtmlBody(tab.content);
     Array.prototype.forEach.call(body.querySelectorAll("h4"), function (h) { h.remove(); });
-    return !(body.textContent || "").replace(/Thank God for:/g, "").replace(/\s+/g, " ").trim();
+    return !(body.textContent || "").replace(/Thank God for:/g, "").replace(/Prayer requests:/g, "").replace(/\s+/g, " ").trim();
   }
   function cloneNoteTab(t) { return { id: t.id, name: t.name, content: t.content }; }
   function indexNoteTabs(tabs) {
