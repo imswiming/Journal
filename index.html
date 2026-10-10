@@ -114,7 +114,7 @@
      reserve exactly this much room - the sticky Notes header and Read nav
      bar rest at that padding edge, and a mismatch shows as them tucking
      slightly under this bar. */
-  :root { --column-tabs-height: 62px; }
+  :root { --column-tabs-height: 31px; }
   .column-tabs {
     position: fixed;
     top: 0;
@@ -134,12 +134,13 @@
   .column-tab {
     flex: 1;
     text-align: center;
-    padding: 0.55rem 0.75rem;
+    padding: 0.15rem 0.6rem;
     border-radius: 999px;
     border: 1px solid var(--line);
     background: var(--panel);
     color: var(--ink);
-    font-size: 0.85rem;
+    font-size: 0.8rem;
+    line-height: 1.2;
     font-weight: 600;
     cursor: pointer;
     font-family: inherit;
@@ -218,8 +219,8 @@
   }
   .notes-toolbar-row {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
+    flex-wrap: nowrap;
+    gap: 0.3rem;
     margin-bottom: 0.75rem;
   }
   .notes-toolbar-btn {
@@ -228,10 +229,13 @@
     border: 1px solid var(--line);
     border-radius: 8px;
     font-size: 0.8rem;
-    padding: 0.35rem 0.6rem;
+    padding: 0.35rem 0.2rem;
     cursor: pointer;
     font-family: inherit;
   }
+  /* All the buttons stay on one line: they share the width equally, up to a
+     comfortable maximum. */
+  .notes-toolbar-row .notes-toolbar-btn { flex: 1 1 0; min-width: 0; max-width: 2.8rem; text-align: center; }
   .notes-toolbar-btn:hover { background: var(--bg); }
   .notes-toolbar-btn:disabled { opacity: 0.5; cursor: default; }
   .notes-toolbar-btn:disabled:hover { background: var(--panel); }
@@ -4751,6 +4755,11 @@
       if (!notesEditor) return;
       var isHighlighted = notesEditor.commands.get("highlight").value === "yellowMarker";
       notesEditor.execute("highlight", { value: isHighlighted ? null : "yellowMarker" });
+      notesEditor.editing.view.focus();
+    });
+    makeBtn("☑", "Checklist - turn this line into a tick-box item (tap again to undo)", function () {
+      if (!notesEditor) return;
+      notesEditor.execute("todoList");
       notesEditor.editing.view.focus();
     });
     makeBtn("⇤", "Decrease indent", outdentNotesLine);
