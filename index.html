@@ -4331,37 +4331,50 @@
     cloudMarkDirty("notes");
     renderNotesTabBar();
   }
-  // Drag a row by its handle: the row follows the pointer, the others make
-  // way, and the new order is applied when it's let go.
+  // Drag a row by its handle: the row follows the pointer, the others slide
+  // out of the way, and the new order is applied when it's let go. The dragged
+  // row is never moved in the DOM while dragging - re-inserting it would make
+  // the browser drop the pointer capture and end the drag after one swap -
+  // everything is done with transforms, then the list is rebuilt on release.
   function startTabRowDrag(row, handle, e) {
     e.preventDefault();
     try { handle.setPointerCapture(e.pointerId); } catch (err) { /* older browsers: still tracks over the handle */ }
+    var rows = Array.prototype.slice.call(tabsListEl.children);
+    var from = rows.indexOf(row);
+    var boxes = rows.map(function (r) { return r.getBoundingClientRect(); });
+    var gap = parseFloat(getComputedStyle(tabsListEl).rowGap) || 6;
+    var step = boxes[from].height + gap;
+    var startY = e.clientY;
+    var to = from;
     row.classList.add("dragging");
+    rows.forEach(function (r) { r.style.transition = r === row ? "none" : "transform 0.12s ease"; });
     function onMove(ev) {
-      var y = ev.clientY;
-      var others = Array.prototype.filter.call(tabsListEl.children, function (r) { return r !== row; });
-      var before = null;
-      for (var i = 0; i < others.length; i++) {
-        var box = others[i].getBoundingClientRect();
-        if (y < box.top + box.height / 2) { before = others[i]; break; }
-      }
-      if (before) {
-        if (row.nextSibling !== before) tabsListEl.insertBefore(row, before);
-      } else if (tabsListEl.lastChild !== row) {
-        tabsListEl.appendChild(row);
-      }
-      // Keep the row in view when dragging near the edge of a long list.
-      var list = tabsListEl.getBoundingClientRect();
-      if (y < list.top + 24) tabsListEl.scrollTop -= 8;
-      else if (y > list.bottom - 24) tabsListEl.scrollTop += 8;
+      var dy = ev.clientY - startY;
+      row.style.transform = "translateY(" + dy + "px)";
+      var centre = boxes[from].top + boxes[from].height / 2 + dy;
+      var target = from;
+      rows.forEach(function (r, i) {
+        var mid = boxes[i].top + boxes[i].height / 2;
+        if (i < from && centre < mid) target--;
+        else if (i > from && centre > mid) target++;
+      });
+      to = target;
+      rows.forEach(function (r, i) {
+        if (r === row) return;
+        var shift = 0;
+        if (i < from && i >= to) shift = step;        // making room above
+        else if (i > from && i <= to) shift = -step;  // closing the gap below
+        r.style.transform = shift ? "translateY(" + shift + "px)" : "";
+      });
     }
     function onEnd() {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onEnd);
       handle.removeEventListener("pointercancel", onEnd);
-      row.classList.remove("dragging");
-      applyNotesTabOrder(Array.prototype.map.call(tabsListEl.children, function (r) { return r.getAttribute("data-id"); }));
-      renderTabsOverlay();
+      var ids = rows.map(function (r) { return r.getAttribute("data-id"); });
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      applyNotesTabOrder(ids);
+      renderTabsOverlay(); // rebuilds the rows, which also clears the transforms
     }
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onEnd);
