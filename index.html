@@ -676,6 +676,18 @@
     gap: 0.4rem;
     flex-wrap: wrap;
   }
+  #selection-comment {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: 40rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+    font: inherit;
+    resize: none;
+  }
   .selection-menu button {
     padding: 0.5rem 0.9rem;
     border: none;
@@ -1207,6 +1219,7 @@
 </div>
 
 <div id="selection-menu" class="selection-menu" style="display:none;">
+  <textarea id="selection-comment" rows="2" placeholder="Write a comment on this verse (added to the Journal)"></textarea>
   <button id="selection-highlight-btn" type="button">Highlight</button>
   <button id="selection-highlight-verse-btn" type="button">Highlight verse</button>
   <button id="selection-read-btn" type="button">I read this</button>
@@ -2181,6 +2194,7 @@
   var textEl = document.getElementById("bible-text");
   var emptyEl = document.getElementById("bible-empty");
   var selectionMenu = document.getElementById("selection-menu");
+  var selectionCommentInput = document.getElementById("selection-comment");
   var selectionHighlightBtn = document.getElementById("selection-highlight-btn");
   var selectionHighlightVerseBtn = document.getElementById("selection-highlight-verse-btn");
   var selectionReadBtn = document.getElementById("selection-read-btn");
@@ -2217,6 +2231,7 @@
     commentInput.value = "";
     commentOverlay.style.display = "block";
     showXrefsFor(findMarkVerseRef(mark));
+    revealAboveMenu(mark, commentOverlay);
   }
   // Typing a comment and closing this (Escape, tapping outside, or the
   // dedicated remove button clearing the text first) adds the verse and the
@@ -2568,7 +2583,45 @@
   // Every verse the selection spans (selectionMenuRef is just the first).
   var selectionMenuRefs = null;
 
-  function hideSelectionMenu() { selectionMenu.style.display = "none"; selectionMenuRef = null; selectionMenuRefs = null; }
+  function hideSelectionMenu() {
+    // A comment typed in the menu is added to the Journal with the verse when
+    // the menu closes - same as the highlight box - so it's never silently lost.
+    var comment = selectionCommentInput.value.trim();
+    var refs = selectionMenuRefs;
+    selectionMenu.style.display = "none";
+    selectionMenuRef = null;
+    selectionMenuRefs = null;
+    selectionCommentInput.value = "";
+    if (comment && refs && refs.length) {
+      addVersesToJournal(refs, comment);
+      logActivity("comment", refs[0].book, refs[0].chapter, refs[0].verse, comment);
+    }
+  }
+
+  // Both menus (this one and the highlight box) cover the bottom of the
+  // screen, so after one opens, Read scrolls just far enough to bring the
+  // verse into view above it - never so far that the verse's top slips behind
+  // the nav bar. The scroll is the app's own, so the close-on-scroll handlers
+  // ignore it for a moment (menuAutoScrollUntil).
+  var menuAutoScrollUntil = 0;
+  function revealAboveMenu(target, menuEl) {
+    if (!target || !menuEl) return;
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        if (menuEl.style.display === "none") return;
+        var box = target.getBoundingClientRect();
+        var menuTop = menuEl.getBoundingClientRect().top;
+        var hidden = box.bottom - (menuTop - 12);
+        if (hidden <= 0) return;
+        var topLimit = Math.max(readColumn.getBoundingClientRect().top, navBarEl.getBoundingClientRect().bottom) + 8;
+        var room = box.top - topLimit;
+        var shift = Math.min(hidden, Math.max(room, 0));
+        if (shift < 1) return;
+        menuAutoScrollUntil = Date.now() + 600;
+        readColumn.scrollTop += shift;
+      });
+    });
+  }
   // Both this menu and the mobile cross references panel dock at the bottom
   // of the screen - while the panel's open, the menu sits just above it.
   function positionSelectionMenu() {
@@ -2577,6 +2630,7 @@
   }
 
   function checkSelectionForMenu(clickX, clickY) {
+    if (document.activeElement === selectionCommentInput) return; // typing a comment: leave the menu alone
     var hasCoords = typeof clickX === "number";
     if (commentOverlay.style.display !== "none") {
       hideSelectionMenu();
@@ -2621,6 +2675,10 @@
     selectionHighlightBtn.style.display = sel.isCollapsed ? "none" : "";
     selectionHighlightVerseBtn.style.display = sel.isCollapsed ? "" : "none";
     positionSelectionMenu();
+    revealAboveMenu(
+      sel.isCollapsed ? textEl.querySelector(".verse-flash-keep") : { getBoundingClientRect: function () { return range.getBoundingClientRect(); } },
+      selectionMenu
+    );
   }
 
   var lastTouchTime = 0;
@@ -3208,9 +3266,12 @@
   selectionOverviewBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
   selectionOverviewBtn.addEventListener("click", function () {
     var refs = selectionMenuRefs || [selectionMenuRef];
+    var comment = selectionCommentInput.value.trim();
+    selectionCommentInput.value = ""; // taken here, so closing the menu doesn't add it a second time
     hideSelectionMenu();
     window.getSelection().removeAllRanges();
-    addVersesToJournal(refs);
+    addVersesToJournal(refs, comment);
+    if (comment && refs[0]) logActivity("comment", refs[0].book, refs[0].chapter, refs[0].verse, comment);
   });
 
   xrefCloseBtn.addEventListener("click", closeXrefOverlay);
@@ -3307,7 +3368,11 @@
   var navBarEl = document.querySelector(".nav-bar");
   autoHideOnScroll(readColumn, navBarEl, false);
   autoHideOnScroll(document.getElementById("col-notes"), document.querySelector(".notes-sticky-header"), true);
-  readColumn.addEventListener("scroll", hideSelectionMenu, { passive: true });
+  readColumn.addEventListener("scroll", function () {
+    if (Date.now() < menuAutoScrollUntil) return;                // our own scroll-into-view
+    if (document.activeElement === selectionCommentInput) return; // the keyboard can scroll the page itself
+    hideSelectionMenu();
+  }, { passive: true });
 
   // The highlight box (see openCommentEditor) closes on scrolling Read too,
   // like the selection menu above - only for a scroll the user actually made
@@ -3321,6 +3386,7 @@
   readColumn.addEventListener("wheel", markReadUserScroll, { passive: true });
   readColumn.addEventListener("scroll", function () {
     if (commentOverlay.style.display === "none") return;
+    if (Date.now() < menuAutoScrollUntil) return;
     if (document.activeElement === commentInput) return;
     if (Date.now() - readUserScrollAt > 1000) return;
     closeCommentEditor();
