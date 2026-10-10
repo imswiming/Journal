@@ -3935,6 +3935,16 @@
   // top-level block. Falls back to right after today's gratitude box when
   // there's no tracked position, or it no longer resolves (e.g. the tab was
   // otherwise edited since).
+  // Text of the last line inside a block: a bubble's last bullet (or
+  // paragraph), a list's last item - not the whole block's text.
+  function lastLineTextOf(el) {
+    var cur = el;
+    while (cur && cur.lastElementChild && (/^(BLOCKQUOTE|UL|OL)$/.test(cur.tagName) ||
+        (cur.tagName === "LI" && /^(UL|OL)$/.test(cur.lastElementChild.tagName)))) {
+      cur = cur.lastElementChild;
+    }
+    return cur ? cur.textContent : "";
+  }
   function insertAtJournalCaret(tab, blocksHtml) {
     var scratch = document.createElement("div");
     scratch.innerHTML = tab.content;
@@ -3948,9 +3958,11 @@
     var anchor = null;
     var tail = null;      // the rest of a list the entry lands in the middle of
     var replace = null;   // a blank line the entry takes the place of
+    var aboveEl = null;   // the line directly above where the entry will land
     if (block && isList(block) && journalCaretListItemIndex !== null) {
       var li = block.children[journalCaretListItemIndex];
       if (li) {
+        aboveEl = li.textContent.trim() ? li : (li.previousElementSibling || block.previousElementSibling);
         var following = Array.prototype.slice.call(block.children, journalCaretListItemIndex + 1);
         if (following.length) {
           tail = block.cloneNode(false);
@@ -3968,7 +3980,8 @@
       }
     } else if (block) {
       anchor = block;
-      if (isBlank(block)) replace = block;  // a blank line is replaced by the entry, not left above it
+      aboveEl = block;
+      if (isBlank(block)) { replace = block; aboveEl = block.previousElementSibling; } // a blank line is replaced by the entry, not left above it
     }
     if (!anchor && !(block && isList(block))) {
       // No known line: under today's "Thank God for:" box, on its first blank line.
@@ -3976,7 +3989,13 @@
         return /^\s*thank god for/i.test(q.textContent || "");
       })[0];
       anchor = box || null;
+      aboveEl = box || null;
       if (anchor && isBlank(anchor.nextElementSibling)) { anchor = anchor.nextElementSibling; replace = anchor; }
+    }
+    if (aboveEl && lastLineTextOf(aboveEl).trim()) {
+      var gap = document.createElement("p");
+      gap.innerHTML = "&nbsp;";
+      nodes.unshift(gap);
     }
 
     var last;
@@ -4033,26 +4052,44 @@
   // caret (the whole gratitude box if the caret's inside it, otherwise the
   // paragraph or list item it's on), then puts the caret at the end of what
   // was inserted. If the caret is on an empty line, that line is replaced
-  // rather than left sitting above the new entry as a blank first line.
+  // rather than left sitting above the new entry as a blank first line. If
+  // the line directly above the entry has text in it, a blank line goes
+  // between them; if it's already blank, nothing is added.
+  function modelTextOf(node) {
+    if (node.is("$text")) return node.data;
+    var text = "";
+    if (node.getChildren) Array.from(node.getChildren()).forEach(function (child) { text += modelTextOf(child); });
+    return text;
+  }
+  function modelLastLineText(node) {
+    var cur = node;
+    while (cur && cur.is("element", "blockQuote") && cur.childCount) cur = cur.getChild(cur.childCount - 1);
+    return cur ? modelTextOf(cur) : "";
+  }
   function insertAtEditorCaret(html) {
     var editor = notesEditor;
     var model = editor.model;
-    var fragment = editor.data.toModel(editor.data.processor.toView(html));
+    var root = model.document.getRoot();
+    var pos = model.document.selection.getLastPosition();
+    var block = pos ? pos.parent : null;
+    while (block && block.parent && block.parent !== root) block = block.parent;
+    var hasBlock = !!block && block !== root;
+    var emptyLine = hasBlock && block.is("element", "paragraph") && block.childCount === 0;
+    var above = hasBlock ? (emptyLine ? block.previousSibling : block) : root.getChild(root.childCount - 1);
+    var needGap = !!above && /\S/.test(modelLastLineText(above));
+    var fragment = editor.data.toModel(editor.data.processor.toView((needGap ? BLANK_LINE : "") + html));
     model.change(function (writer) {
-      var root = model.document.getRoot();
-      var pos = model.document.selection.getLastPosition();
-      var block = pos ? pos.parent : null;
-      while (block && block.parent && block.parent !== root) block = block.parent;
-      var insertPos = (block && block !== root)
+      var insertPos = hasBlock
         ? writer.createPositionAfter(block)
         : writer.createPositionAt(root, "end");
-      var emptyLine = block && block !== root && block.is("element", "paragraph") && block.childCount === 0;
       var range = model.insertContent(fragment, insertPos);
-      if (emptyLine) writer.remove(block);
+      // Find where the caret goes before the blank line is removed - removing
+      // it shifts everything after it, so range.end would then be stale.
       var target = range.end.nodeBefore;
       while (target && target.is("element") && !model.schema.checkChild(target, "$text") && target.childCount) {
         target = target.getChild(target.childCount - 1);
       }
+      if (emptyLine) writer.remove(block);
       if (target && target.is("element") && model.schema.checkChild(target, "$text")) {
         writer.setSelection(target, "end");
       }
