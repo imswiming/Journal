@@ -722,10 +722,11 @@
   .tabs-row { display: flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.45rem; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
   .tabs-row.closed .tabs-row-name { color: var(--muted); }
   .tabs-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; background: none; border: none; font: inherit; font-weight: 600; color: var(--ink); padding: 0.3rem 0.2rem; cursor: pointer; }
-  .tabs-move { flex: 0 0 auto; width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; cursor: pointer; }
-  .tabs-move:disabled { opacity: 0.35; cursor: default; }
-  .tabs-toggle { flex: 0 0 auto; min-width: 4.2rem; padding: 0.35rem 0.6rem; border-radius: 999px; font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: #fff; }
-  .tabs-toggle.closed { background: transparent; color: var(--accent); }
+  .tabs-handle { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); font-size: 1.1rem; line-height: 1; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .tabs-handle:active { cursor: grabbing; }
+  .tabs-row.dragging { border-color: var(--accent); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); position: relative; z-index: 1; }
+  .tabs-toggle { flex: 0 0 auto; min-width: 5.4rem; padding: 0.4rem 0.7rem; border-radius: 999px; font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; border: 1px solid var(--accent); background: transparent; color: var(--accent); }
+  .tabs-toggle.open-action { background: var(--accent); color: #fff; }
   .notes-tab-folder { position: sticky; left: 0; z-index: 1; flex: 0 0 auto; }
   .modal-box {
     background: var(--panel);
@@ -1265,7 +1266,7 @@
 <div id="tabs-overlay" class="modal-overlay" style="display:none;">
   <div class="modal-box tabs-box">
     <h3>Your notes</h3>
-    <p class="account-note">Open or close notes and change their order. A closed note isn't deleted - open it again here any time.</p>
+    <p class="account-note">Drag the box to reorder your notes. A closed note isn't deleted - open it again here any time.</p>
     <div id="tabs-list" class="tabs-list"></div>
     <div class="comment-actions">
       <span class="nav-spacer"></span>
@@ -3934,40 +3935,64 @@
   // top-level block. Falls back to right after today's gratitude box when
   // there's no tracked position, or it no longer resolves (e.g. the tab was
   // otherwise edited since).
-  function insertAtJournalCaret(tab, liInnerHtml) {
+  function insertAtJournalCaret(tab, blocksHtml) {
     var scratch = document.createElement("div");
     scratch.innerHTML = tab.content;
-    var newLi = document.createElement("li");
-    newLi.innerHTML = liInnerHtml;
+    var holder = document.createElement("div");
+    holder.innerHTML = blocksHtml;
+    var nodes = Array.prototype.slice.call(holder.children);
+    var isList = function (el) { return !!el && (el.tagName === "UL" || el.tagName === "OL"); };
+    var isBlank = function (el) { return !!el && el.tagName === "P" && !el.textContent.trim(); };
 
     var block = journalCaretBlockIndex !== null ? scratch.children[journalCaretBlockIndex] : null;
-    if (block && (block.tagName === "UL" || block.tagName === "OL") && journalCaretListItemIndex !== null) {
+    var anchor = null;
+    var tail = null;      // the rest of a list the entry lands in the middle of
+    var replace = null;   // a blank line the entry takes the place of
+    if (block && isList(block) && journalCaretListItemIndex !== null) {
       var li = block.children[journalCaretListItemIndex];
       if (li) {
-        li.insertAdjacentElement("afterend", newLi);
+        var following = Array.prototype.slice.call(block.children, journalCaretListItemIndex + 1);
+        if (following.length) {
+          tail = block.cloneNode(false);
+          following.forEach(function (f) { tail.appendChild(f); });
+        }
         if (!li.textContent.trim() && !li.querySelector("li")) li.remove(); // an empty bullet is replaced, not left above
-        // The next add goes after this one, not back above it.
-        journalCaretListItemIndex = Array.prototype.indexOf.call(block.children, newLi);
-        tab.content = scratch.innerHTML;
-        saveNotesTabs();
-        if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
-        return;
+        if (block.children.length) {
+          anchor = block;
+        } else {
+          anchor = block.previousElementSibling;
+          block.remove();
+        }
+      } else {
+        block = null; // that line's gone - fall through to the default spot
       }
-      block = null; // that line's gone - fall through to the block/fallback case
+    } else if (block) {
+      anchor = block;
+      if (isBlank(block)) replace = block;  // a blank line is replaced by the entry, not left above it
+    }
+    if (!anchor && !(block && isList(block))) {
+      // No known line: under today's "Thank God for:" box, on its first blank line.
+      var box = Array.prototype.slice.call(scratch.querySelectorAll("blockquote")).filter(function (q) {
+        return /^\s*thank god for/i.test(q.textContent || "");
+      })[0];
+      anchor = box || null;
+      if (anchor && isBlank(anchor.nextElementSibling)) { anchor = anchor.nextElementSibling; replace = anchor; }
     }
 
-    var anchor = block || scratch.querySelector("blockquote");
-    var newUl = document.createElement("ul");
-    newUl.appendChild(newLi);
+    var last;
     if (anchor) {
-      anchor.insertAdjacentElement("afterend", newUl);
-      // A blank line is replaced by the entry, not left above it.
-      if (anchor === block && anchor.tagName === "P" && !anchor.textContent.trim()) anchor.remove();
+      var ref = anchor;
+      nodes.forEach(function (n) { ref.insertAdjacentElement("afterend", n); ref = n; });
+      last = ref;
     } else {
-      scratch.insertBefore(newUl, scratch.firstChild);
+      var first = scratch.firstChild;
+      nodes.forEach(function (n) { scratch.insertBefore(n, first); });
+      last = nodes[nodes.length - 1];
     }
-    journalCaretBlockIndex = Array.prototype.indexOf.call(scratch.children, newUl);
-    journalCaretListItemIndex = 0;
+    if (tail && last) last.insertAdjacentElement("afterend", tail);
+    if (replace && replace.parentNode) replace.remove();
+    journalCaretBlockIndex = Array.prototype.indexOf.call(scratch.children, last);
+    journalCaretListItemIndex = isList(last) ? last.children.length - 1 : null;
     tab.content = scratch.innerHTML;
     saveNotesTabs();
     if (tab.id === activeNotesTabId && notesEditor) notesEditor.setData(tab.content);
@@ -4034,12 +4059,12 @@
     });
   }
 
-  // Every Journal entry is a plain bullet. liInnerHtml is the bullet's own
-  // (already escaped) content - for a verse with a comment, that includes a
-  // nested list holding the comment, so it sits indented underneath.
-  function addBulletToJournal(liInnerHtml, matchText) {
-    insertIntoJournal("<ul><li>" + liInnerHtml + "</li></ul>", matchText, function (tab) {
-      insertAtJournalCaret(tab, liInnerHtml);
+  // Verses go into the Journal as plain lines, not bullets; only a comment
+  // typed on a verse is a bullet (see addVersesToJournal). blocksHtml is the
+  // (already escaped) paragraphs/list to insert.
+  function addBlocksToJournal(blocksHtml, matchText) {
+    insertIntoJournal(blocksHtml, matchText, function (tab) {
+      insertAtJournalCaret(tab, blocksHtml);
     });
   }
 
@@ -4053,7 +4078,7 @@
   // the selection menu's and highlight box's "Add to Journal".
   function addScriptureToJournal(text) {
     if (!text) return;
-    addBulletToJournal(journalVerseMark(text), text);
+    addBlocksToJournal("<p>" + journalVerseMark(text) + "</p>", text);
   }
 
   // A verse with a comment typed on it (see closeCommentEditor and the
@@ -4064,22 +4089,16 @@
     addVersesToJournal([ref], commentText);
   }
 
-  // One or more verses (a selection or highlight can span several), each its
-  // own bullet in order, with the comment - if any - indented under the last.
+  // One or more verses (a selection or highlight can span several), each on
+  // its own line in order, with the comment - if any - as the only bullet,
+  // directly under the last verse.
   function addVersesToJournal(refs, commentText) {
     refs = (refs || []).filter(Boolean);
     if (!refs.length) return;
     var lines = refs.map(function (ref) { return formatVerseOverviewLine(ref); });
-    var lastIndex = lines.length - 1;
-    function bulletInner(line, i) {
-      var inner = journalVerseMark(line);
-      if (i === lastIndex && commentText) inner += "<ul><li>" + escapeHtml(commentText) + "</li></ul>";
-      return inner;
-    }
-    var html = "<ul>" + lines.map(function (line, i) { return "<li>" + bulletInner(line, i) + "</li>"; }).join("") + "</ul>";
-    insertIntoJournal(html, lines[lastIndex] + (commentText || ""), function (tab) {
-      lines.forEach(function (line, i) { insertAtJournalCaret(tab, bulletInner(line, i)); });
-    });
+    var html = lines.map(function (line) { return "<p>" + journalVerseMark(line) + "</p>"; }).join("");
+    if (commentText) html += "<ul><li>" + escapeHtml(commentText) + "</li></ul>";
+    addBlocksToJournal(html, commentText || lines[lines.length - 1]);
   }
 
   // After an add: closes the search overlay if it was added from there, shows
@@ -4097,7 +4116,7 @@
         if (!notesEditor) return;
         var editableRoot = notesEditor.ui.getEditableElement();
         if (!editableRoot) return;
-        var entry = Array.prototype.find.call(editableRoot.querySelectorAll("li, blockquote"), function (el) {
+        var entry = Array.prototype.find.call(editableRoot.querySelectorAll("p, li, blockquote"), function (el) {
           return el.textContent.trim() === text;
         });
         if (!entry) return;
@@ -4286,12 +4305,14 @@
     renderNotesTabBar();
     renderTabsOverlay();
   }
-  function moveNotesTab(id, delta) {
-    var from = notesTabs.findIndex(function (t) { return t.id === id; });
-    var to = from + delta;
-    if (from === -1 || to < 0 || to >= notesTabs.length) return;
-    var moved = notesTabs.splice(from, 1)[0];
-    notesTabs.splice(to, 0, moved);
+  // Puts the notes in the order of ids (a list of every tab id).
+  function applyNotesTabOrder(ids) {
+    var byId = {};
+    notesTabs.forEach(function (t) { byId[t.id] = t; });
+    var reordered = ids.map(function (id) { return byId[id]; }).filter(Boolean);
+    if (reordered.length !== notesTabs.length) return;
+    if (reordered.every(function (t, i) { return t === notesTabs[i]; })) return;
+    notesTabs = reordered;
     saveNotesTabs();
     // The tabs sync in the order they're stored, so a pure reorder needs its
     // own flag - see cloudMergeNotes.
@@ -4299,14 +4320,57 @@
     st.orderDirty = ++st.seq;
     cloudMarkDirty("notes");
     renderNotesTabBar();
-    renderTabsOverlay();
+  }
+  // Drag a row by its handle: the row follows the pointer, the others make
+  // way, and the new order is applied when it's let go.
+  function startTabRowDrag(row, handle, e) {
+    e.preventDefault();
+    try { handle.setPointerCapture(e.pointerId); } catch (err) { /* older browsers: still tracks over the handle */ }
+    row.classList.add("dragging");
+    function onMove(ev) {
+      var y = ev.clientY;
+      var others = Array.prototype.filter.call(tabsListEl.children, function (r) { return r !== row; });
+      var before = null;
+      for (var i = 0; i < others.length; i++) {
+        var box = others[i].getBoundingClientRect();
+        if (y < box.top + box.height / 2) { before = others[i]; break; }
+      }
+      if (before) {
+        if (row.nextSibling !== before) tabsListEl.insertBefore(row, before);
+      } else if (tabsListEl.lastChild !== row) {
+        tabsListEl.appendChild(row);
+      }
+      // Keep the row in view when dragging near the edge of a long list.
+      var list = tabsListEl.getBoundingClientRect();
+      if (y < list.top + 24) tabsListEl.scrollTop -= 8;
+      else if (y > list.bottom - 24) tabsListEl.scrollTop += 8;
+    }
+    function onEnd() {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onEnd);
+      handle.removeEventListener("pointercancel", onEnd);
+      row.classList.remove("dragging");
+      applyNotesTabOrder(Array.prototype.map.call(tabsListEl.children, function (r) { return r.getAttribute("data-id"); }));
+      renderTabsOverlay();
+    }
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onEnd);
+    handle.addEventListener("pointercancel", onEnd);
   }
   function renderTabsOverlay() {
     tabsListEl.innerHTML = "";
-    notesTabs.forEach(function (tab, i) {
+    notesTabs.forEach(function (tab) {
       var closed = isTabClosed(tab.id) && tab.id !== activeNotesTabId;
       var row = document.createElement("div");
       row.className = "tabs-row" + (closed ? " closed" : "");
+      row.setAttribute("data-id", tab.id);
+
+      var handle = document.createElement("div");
+      handle.className = "tabs-handle";
+      handle.title = "Drag to reorder";
+      handle.textContent = String.fromCharCode(0x2630);
+      handle.addEventListener("pointerdown", function (e) { startTabRowDrag(row, handle, e); });
+      row.appendChild(handle);
 
       var name = document.createElement("button");
       name.type = "button";
@@ -4319,24 +4383,20 @@
       });
       row.appendChild(name);
 
-      [[0x25B2, "Move up", -1], [0x25BC, "Move down", 1]].forEach(function (def) {
-        var b = document.createElement("button");
-        b.type = "button";
-        b.className = "tabs-move";
-        b.textContent = String.fromCharCode(def[0]);
-        b.title = def[1];
-        b.disabled = (def[2] < 0 && i === 0) || (def[2] > 0 && i === notesTabs.length - 1);
-        b.addEventListener("click", function () { moveNotesTab(tab.id, def[2]); });
-        row.appendChild(b);
+      var action = document.createElement("button");
+      action.type = "button";
+      action.className = "tabs-toggle" + (closed ? " open-action" : "");
+      action.textContent = closed ? "Open tab" : "Close tab";
+      action.addEventListener("click", function () {
+        if (closed) {
+          // Open it for real: back in the tab bar and shown.
+          switchNotesTab(tab.id);
+          closeTabsOverlay();
+        } else {
+          setNotesTabClosed(tab.id, true);
+        }
       });
-
-      var toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "tabs-toggle" + (closed ? " closed" : "");
-      toggle.textContent = closed ? "Closed" : "Open";
-      toggle.title = closed ? "Open this note" : "Close this note";
-      toggle.addEventListener("click", function () { setNotesTabClosed(tab.id, !closed); });
-      row.appendChild(toggle);
+      row.appendChild(action);
 
       tabsListEl.appendChild(row);
     });
