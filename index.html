@@ -627,7 +627,7 @@
     background: var(--bg);
     color: var(--ink);
     font: inherit;
-    resize: vertical;
+    resize: none;
   }
   .comment-actions {
     display: flex;
@@ -791,6 +791,9 @@
     .notes-tab-bar::-webkit-scrollbar { display: none; }
     .notes-tab { flex: 0 0 auto; white-space: nowrap; }
     .sync-in-tabs { flex: 0 0 auto; margin-left: auto; }
+    /* The folder stays put while the tabs scroll; a thick ring in the page
+       colour around it hides them as they slide behind. */
+    .notes-tab-folder { box-shadow: 0 0 0 0.45rem var(--bg); margin-right: 0.35rem; }
   }
   .account-box { max-width: 26rem; }
   .account-box h3 {
@@ -1260,8 +1263,7 @@
 
 <div id="comment-overlay" style="display:none;">
   <div class="comment-box">
-    <label for="comment-input">Comment on this highlight (added to Journal when closed)</label>
-    <textarea id="comment-input" rows="4"></textarea>
+    <textarea id="comment-input" rows="2" placeholder="Write a comment on this verse (added to the Journal)" aria-label="Comment on this highlight"></textarea>
     <div class="comment-actions">
       <button id="comment-journal" type="button">Add to Journal</button>
       <button id="mark-read-today" type="button">I read this today</button>
@@ -2291,9 +2293,16 @@
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && commentOverlay.style.display !== "none") closeCommentEditor();
   });
+  // Tapping the highlight whose box is open should close the box, not close
+  // and instantly reopen it: the mousedown closes it, so remember which one
+  // that was for the click that follows.
+  var lastClosedMark = null;
+  var lastClosedAt = 0;
   document.addEventListener("mousedown", function (e) {
     if (commentOverlay.style.display === "none") return;
     if (commentOverlay.contains(e.target)) return;
+    lastClosedMark = activeCommentMark;
+    lastClosedAt = Date.now();
     closeCommentEditor();
   });
 
@@ -2865,6 +2874,7 @@
   textEl.addEventListener("click", function (e) {
     var mark = e.target.closest ? e.target.closest("mark.highlight") : null;
     if (!mark) return;
+    if (mark === lastClosedMark && Date.now() - lastClosedAt < 600) return;
     openCommentEditor(mark);
   });
 
@@ -3723,7 +3733,8 @@
   // The Journal's first block is always this "Prayer requests:" bubble - a
   // checklist, so requests can be ticked off - and each new day's date +
   // gratitude box is stamped directly below it (see ensureTodaysDateBlock).
-  var PRAYER_HTML = '<blockquote><p>Prayer requests:</p><ul class="todo-list"><li><label class="todo-list__label"><input type="checkbox" disabled="disabled"><span class="todo-list__label__description">&nbsp;</span></label></li></ul></blockquote>';
+  var PRAYER_VERSE = "James 5:16 — Therefore confess your sins to each other and pray for each other so that you may be healed. The prayer of a righteous person is powerful and effective.";
+  var PRAYER_HTML = '<blockquote><p>' + PRAYER_VERSE + '</p><p>Prayer requests:</p><ul class="todo-list"><li><label class="todo-list__label"><input type="checkbox" disabled="disabled"><span class="todo-list__label__description">&nbsp;</span></label></li></ul></blockquote>';
   var GRATITUDE_HTML = "<blockquote><p><i>Thank God for:</i></p><ul><li>&nbsp;</li></ul></blockquote>";
   function isOverviewTab(tab) { return !!tab && tab.name === OVERVIEW_TAB_NAME; }
   function isJournalTab(tab) { return !!tab && tab.name === JOURNAL_TAB_NAME; }
@@ -3845,10 +3856,12 @@
     return changed;
   }
   function isPrayerBubble(el) {
-    return !!el && el.tagName === "BLOCKQUOTE" && /^\s*prayer requests/i.test(el.textContent || "");
+    return !!el && el.tagName === "BLOCKQUOTE" && /prayer requests:/i.test(el.textContent || "");
   }
+  // Anything in the bubble besides its own verse and "Prayer requests:" label.
   function prayerBubbleHasContent(el) {
-    return !!(el.textContent || "").replace(/^\s*prayer requests:?/i, "").replace(/\s+/g, " ").trim();
+    var text = (el.textContent || "").replace(/\s+/g, " ");
+    return !!text.replace(PRAYER_VERSE.replace(/\s+/g, " "), "").replace(/prayer requests:?/i, "").trim();
   }
   // Makes sure the Journal's very first block is the prayer bubble: adds it if
   // it's missing, moves it up if something has ended up above it, and drops
@@ -3864,6 +3877,11 @@
     });
     if (keep) {
       if (body.firstElementChild !== keep || body.firstChild !== keep) { body.insertBefore(keep, body.firstChild); changed = true; }
+      // Bubbles made before the verse was added to it get it now, above the label.
+      if (!/James 5:16/.test(keep.textContent || "")) {
+        keep.insertAdjacentHTML("afterbegin", "<p>" + PRAYER_VERSE + "</p>");
+        changed = true;
+      }
     } else {
       body.insertAdjacentHTML("afterbegin", PRAYER_HTML + TWO_BLANK_LINES);
       changed = true;
@@ -4803,9 +4821,15 @@
         for (var i = 0; i < root.childCount; i++) {
           var quote = root.getChild(i);
           if (!quote.is("element", "blockQuote") || !quote.childCount) continue;
-          var heading = "";
-          Array.from(quote.getChild(0).getChildren()).forEach(function (n) { if (n.is("$text")) heading += n.data; });
-          if (!/^\s*prayer requests/i.test(heading)) continue;
+          var isPrayer = false;
+          for (var k = 0; k < quote.childCount && !isPrayer; k++) {
+            var child = quote.getChild(k);
+            if (child.getAttribute("listType")) continue;
+            var label = "";
+            Array.from(child.getChildren()).forEach(function (n) { if (n.is("$text")) label += n.data; });
+            isPrayer = /^\s*prayer requests/i.test(label);
+          }
+          if (!isPrayer) continue;
           for (var j = 0; j < quote.childCount; j++) {
             var item = quote.getChild(j);
             var type = item.getAttribute("listType");
@@ -5077,7 +5101,7 @@
   function isTrivialNoteTab(tab) {
     var body = parseHtmlBody(tab.content);
     Array.prototype.forEach.call(body.querySelectorAll("h4"), function (h) { h.remove(); });
-    return !(body.textContent || "").replace(/Thank God for:/g, "").replace(/Prayer requests:/g, "").replace(/\s+/g, " ").trim();
+    return !(body.textContent || "").replace(/\s+/g, " ").replace(PRAYER_VERSE.replace(/\s+/g, " "), "").replace(/Thank God for:/g, "").replace(/Prayer requests:/g, "").trim();
   }
   function cloneNoteTab(t) { return { id: t.id, name: t.name, content: t.content }; }
   function indexNoteTabs(tabs) {
