@@ -38,6 +38,7 @@
     --accent: #2f5fd0;
     --highlight: #fff3a0;
     --flash: #eef2f6;
+    --jesus: #b3261e;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -49,6 +50,7 @@
       --accent: #7ea2ff;
       --highlight: #6b5d1f;
       --flash: #2b3747;
+      --jesus: #ff8a80;
     }
   }
   * { box-sizing: border-box; }
@@ -561,9 +563,17 @@
   /* The one flash used everywhere - tapping a verse, landing on one from a
      link, and landing on a new Journal entry: solid light grey for the first
      second (1/3 of the 3s), then fading out over the remaining two. */
+  /* The words of Jesus, in red - see applyRedLetters. */
+  .woj { color: var(--jesus); }
   .verse-flash-grey {
     border-radius: 2px;
     animation: verse-flash-grey-fade 3s linear forwards;
+  }
+  /* A tapped verse in the reader stays grey until another verse is tapped
+     (or a tap lands outside the verses) - only link jumps fade. */
+  .verse-flash-grey.verse-flash-keep {
+    animation: none;
+    background: var(--flash);
   }
   @keyframes verse-flash-grey-fade {
     0%, 33.33% { background: var(--flash); }
@@ -2286,8 +2296,69 @@
       html += '<div class="next-book-nav"><button type="button" class="next-book-btn" data-next-book="' + nextBook + '">Continue to ' + nextBook + ' →</button></div>';
     }
     textEl.innerHTML = html;
+    applyRedLetters(textEl);
     setupObserver();
   }
+
+  // ---------- Words of Jesus in red ----------
+  // data/words-of-jesus.json maps book -> chapter -> verse -> [[start, end], ...]:
+  // character ranges within each verse's text. They're applied to a rendered
+  // chapter as <span class="woj"> around the text (running through any
+  // highlight on it too) rather than baked into the verse text or saved
+  // highlights - see saveHighlightState.
+  var wojData = null;
+  function loadWordsOfJesus() {
+    fetch("data/words-of-jesus.json")
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        wojData = data;
+        applyRedLetters(textEl);
+      })
+      .catch(function () {});
+  }
+  function applyRedLetters(root) {
+    if (!wojData) return;
+    Array.prototype.forEach.call(root.querySelectorAll(".chapter-section"), function (section) {
+      var bookData = wojData[section.getAttribute("data-book")];
+      var chapterData = bookData && bookData[section.getAttribute("data-chapter")];
+      var flow = section.querySelector(".verse-flow");
+      if (!chapterData || !flow || flow.querySelector(".woj")) return;
+      var jobs = [];
+      var verse = null;
+      var offset = 0;
+      var walker = document.createTreeWalker(flow, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, null);
+      var node;
+      while ((node = walker.nextNode())) {
+        if (node.nodeType === 1) {
+          if (node.tagName === "SUP" && node.classList.contains("verse-num")) { verse = node.textContent; offset = 0; }
+          continue;
+        }
+        var parent = node.parentNode;
+        if (parent.tagName === "SUP" && parent.classList.contains("verse-num")) continue;
+        var length = node.nodeValue.length;
+        var ranges = verse && chapterData[verse];
+        if (ranges) {
+          for (var i = 0; i < ranges.length; i++) {
+            var from = Math.max(ranges[i][0], offset);
+            var to = Math.min(ranges[i][1], offset + length);
+            if (to > from) jobs.push([node, from - offset, to - offset]);
+          }
+        }
+        offset += length;
+      }
+      // Wrap from the end, so earlier ranges in the same text node stay valid.
+      for (var j = jobs.length - 1; j >= 0; j--) {
+        var range = document.createRange();
+        range.setStart(jobs[j][0], jobs[j][1]);
+        range.setEnd(jobs[j][0], jobs[j][2]);
+        var span = document.createElement("span");
+        span.className = "woj";
+        range.surroundContents(span);
+      }
+    });
+  }
+  loadWordsOfJesus();
 
   textEl.addEventListener("click", function (e) {
     var btn = e.target.closest ? e.target.closest(".next-book-btn") : null;
@@ -2398,9 +2469,11 @@
     var flow = sectionEl.querySelector(".verse-flow");
     // A tap's temporary grey flash (see flashVerse) is a wrapping <span> that
     // only lives for a few seconds - unwrap it from what's saved, or
-    // highlighting within that window would bake the flash in permanently.
+    // highlighting within that window would bake the flash in permanently. The
+    // red words of Jesus (applyRedLetters) are re-applied on every render, so
+    // they're left out of what's saved and synced too.
     var copy = flow.cloneNode(true);
-    Array.prototype.forEach.call(copy.querySelectorAll(".verse-flash-grey"), function (span) {
+    Array.prototype.forEach.call(copy.querySelectorAll(".verse-flash-grey, .woj"), function (span) {
       while (span.firstChild) span.parentNode.insertBefore(span.firstChild, span);
       span.parentNode.removeChild(span);
     });
@@ -2457,6 +2530,7 @@
     var el = node.nodeType === 1 ? node : node.parentElement;
     var ref = findSelectionVerseRef();
     if (!el || !textEl.contains(el) || !ref) {
+      if (sel.isCollapsed) clearVerseFlash(); // a tap outside the verses lets go of the grey
       hideSelectionMenu();
       return;
     }
@@ -2470,13 +2544,14 @@
       var withinFlow = flowRect &&
         clickY >= flowRect.top - tolerance && clickY <= flowRect.bottom + tolerance;
       if (!withinFlow) {
+        clearVerseFlash();
         hideSelectionMenu();
         return;
       }
       // A plain tap on a verse (not a drag-selection) briefly flashes it
       // light grey, distinct from the yellow flash used for landing on a
       // verse via a hyperlink - just enough to confirm which verse was hit.
-      flashVerse(ref.book, ref.chapter, ref.verse);
+      flashVerse(ref.book, ref.chapter, ref.verse, true);
     }
     selectionHighlightBtn.style.display = sel.isCollapsed ? "none" : "";
     selectionHighlightVerseBtn.style.display = sel.isCollapsed ? "" : "none";
@@ -2577,6 +2652,7 @@
     wrapRangeInMark(range);
     sel.removeAllRanges();
     saveHighlightState(section);
+    clearVerseFlash();
     if (ref) logActivity("highlight", ref.book, ref.chapter, ref.verse);
   });
 
@@ -2618,7 +2694,7 @@
     });
   }
 
-  function flashVerse(book, chapter, verse) {
+  function flashVerse(book, chapter, verse, keep) {
     if (!verse) return;
     clearVerseFlash();
     var section = document.getElementById(sectionId(book, chapter));
@@ -2626,7 +2702,7 @@
     var range = findVerseRange(section, verse);
     if (!range) return;
     var span = document.createElement("span");
-    span.className = "verse-flash-grey";
+    span.className = "verse-flash-grey" + (keep ? " verse-flash-keep" : "");
     try {
       range.surroundContents(span);
     } catch (e) {
@@ -2634,13 +2710,14 @@
       span.appendChild(contents);
       range.insertNode(span);
     }
-    verseFlashTimer = setTimeout(clearVerseFlash, 3000);
+    if (!keep) verseFlashTimer = setTimeout(clearVerseFlash, 3000);
   }
 
   selectionHighlightVerseBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
   selectionHighlightVerseBtn.addEventListener("click", function () {
     var ref = selectionMenuRef;
     hideSelectionMenu();
+    clearVerseFlash(); // the tapped verse's grey gives way to the highlight
     if (!ref) return;
     var section = document.getElementById(sectionId(ref.book, ref.chapter));
     if (!section) return;
@@ -4639,7 +4716,10 @@
     // Leave a chapter alone while its highlight box is open on one of its marks.
     if (activeCommentMark && section.contains(activeCommentMark)) return;
     var flow = section.querySelector(".verse-flow");
-    if (flow) flow.innerHTML = localStorage.getItem(HIGHLIGHT_PREFIX + bookChapter);
+    if (flow) {
+      flow.innerHTML = localStorage.getItem(HIGHLIGHT_PREFIX + bookChapter);
+      applyRedLetters(section);
+    }
   }
 
   // ---------- push ----------
