@@ -4059,6 +4059,10 @@
     });
   }
 
+  // Whatever is added to the Journal is followed by a blank line, where the
+  // caret lands so the next add (or your own typing) starts below it.
+  var BLANK_LINE = "<p>&nbsp;</p>";
+
   // Verses go into the Journal as plain lines, not bullets; only a comment
   // typed on a verse is a bullet (see addVersesToJournal). blocksHtml is the
   // (already escaped) paragraphs/list to insert.
@@ -4078,7 +4082,7 @@
   // the selection menu's and highlight box's "Add to Journal".
   function addScriptureToJournal(text) {
     if (!text) return;
-    addBlocksToJournal("<p>" + journalVerseMark(text) + "</p>", text);
+    addBlocksToJournal("<p>" + journalVerseMark(text) + "</p>" + BLANK_LINE, text);
   }
 
   // A verse with a comment typed on it (see closeCommentEditor and the
@@ -4098,7 +4102,7 @@
     var lines = refs.map(function (ref) { return formatVerseOverviewLine(ref); });
     var html = lines.map(function (line) { return "<p>" + journalVerseMark(line) + "</p>"; }).join("");
     if (commentText) html += "<ul><li>" + escapeHtml(commentText) + "</li></ul>";
-    addBlocksToJournal(html, commentText || lines[lines.length - 1]);
+    addBlocksToJournal(html + BLANK_LINE, commentText || lines[lines.length - 1]);
   }
 
   // After an add: closes the search overlay if it was added from there, shows
@@ -4120,8 +4124,14 @@
           return el.textContent.trim() === text;
         });
         if (!entry) return;
-        placeEditorCaretAtEndOf(entry);
-        trackJournalCaretFromNode(entry);
+        // The caret goes to the blank line under the entry (its top-level
+        // block - the whole list, for a bullet), ready to carry on below.
+        var topBlock = entry;
+        while (topBlock.parentElement && topBlock.parentElement !== editableRoot) topBlock = topBlock.parentElement;
+        var below = topBlock.nextElementSibling;
+        var caretEl = below && below.tagName === "P" && !below.textContent.replace(/[\s\u2060]/g, "") ? below : entry;
+        placeEditorCaretAtEndOf(caretEl);
+        trackJournalCaretFromNode(caretEl);
         if (isDesktopColumns()) notesEditor.editing.view.focus();
         entry.scrollIntoView({ block: "center" });
         // Same light grey flash as verses; restarted cleanly if the same
