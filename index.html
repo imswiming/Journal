@@ -276,7 +276,6 @@
     color: var(--muted);
   }
   .notes-tab-close:hover { background: var(--bg); color: var(--ink); }
-  .notes-tab-add { padding: 0.3rem 0.65rem; color: var(--accent); }
   #notes-editor-wrap { min-height: 50vh; }
   /* CKEditor ships its own light-theme chrome (border, box-shadow, base text
      color) on .ck-content - overridden here to blend into .panel instead.
@@ -724,6 +723,8 @@
   .tabs-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; background: none; border: none; font: inherit; font-weight: 600; color: var(--ink); padding: 0.3rem 0.2rem; cursor: pointer; }
   .tabs-handle { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); font-size: 1.1rem; line-height: 1; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
   .tabs-handle:active { cursor: grabbing; }
+  .tabs-rename { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; font-size: 0.95rem; line-height: 1; cursor: pointer; }
+  .tabs-rename:disabled { opacity: 0.35; cursor: default; }
   .tabs-row.dragging { border-color: var(--accent); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); position: relative; z-index: 1; }
   .tabs-toggle { flex: 0 0 auto; min-width: 5.4rem; padding: 0.4rem 0.7rem; border-radius: 999px; font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; border: 1px solid var(--accent); background: transparent; color: var(--accent); }
   .tabs-toggle.open-action { background: var(--accent); color: #fff; }
@@ -1269,6 +1270,7 @@
     <p class="account-note">Drag the box to reorder your notes. A closed note isn't deleted - open it again here any time.</p>
     <div id="tabs-list" class="tabs-list"></div>
     <div class="comment-actions">
+      <button id="tabs-add" type="button">+ New note</button>
       <span class="nav-spacer"></span>
       <button id="tabs-done" class="account-primary" type="button">Done</button>
     </div>
@@ -4304,10 +4306,17 @@
       renderNotesTabBar();
     });
   }
+  // Resolves once the rename prompt is done (renamed or cancelled).
   function renameNotesTab(id) {
     var tab = notesTabs.filter(function (t) { return t.id === id; })[0];
-    if (!tab) return;
-    showTextPrompt("Rename this note:", tab.name).then(function (name) {
+    if (!tab) return Promise.resolve();
+    // "Journal" and "Overview" are found by name (Add to Journal, the pin
+    // button...), so renaming them would quietly break those.
+    if (isJournalTab(tab) || isOverviewTab(tab)) {
+      showToast("The " + tab.name + " note keeps its name");
+      return Promise.resolve();
+    }
+    return showTextPrompt("Rename this note:", tab.name).then(function (name) {
       if (name === null) return;
       tab.name = name.trim() || tab.name;
       saveNotesTabs();
@@ -4443,6 +4452,19 @@
       });
       row.appendChild(name);
 
+      var rename = document.createElement("button");
+      rename.type = "button";
+      rename.className = "tabs-rename";
+      rename.textContent = String.fromCharCode(0x270F);
+      var fixedName = isJournalTab(tab) || isOverviewTab(tab);
+      rename.title = fixedName ? "This note keeps its name" : "Rename";
+      rename.disabled = fixedName;
+      rename.addEventListener("click", function () {
+        // The name prompt sits in front of the manager, which stays open behind it.
+        renameNotesTab(tab.id).then(renderTabsOverlay);
+      });
+      row.appendChild(rename);
+
       var action = document.createElement("button");
       action.type = "button";
       action.className = "tabs-toggle" + (closed ? " open-action" : "");
@@ -4462,6 +4484,12 @@
     });
   }
   document.getElementById("tabs-done").addEventListener("click", closeTabsOverlay);
+  // New notes are made here now (the + tab is gone): the manager closes so the
+  // name prompt is in front, and the new note opens when it's made.
+  document.getElementById("tabs-add").addEventListener("click", function () {
+    closeTabsOverlay();
+    addNotesTab();
+  });
   tabsOverlay.addEventListener("click", function (e) { if (e.target === tabsOverlay) closeTabsOverlay(); });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && tabsOverlay.style.display !== "none") closeTabsOverlay();
@@ -4513,13 +4541,6 @@
       bar.appendChild(tabEl);
     });
 
-    var addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "notes-tab notes-tab-add";
-    addBtn.title = "Add a note";
-    addBtn.textContent = "+";
-    addBtn.addEventListener("click", addNotesTab);
-    bar.appendChild(addBtn);
     if (syncEl) bar.appendChild(syncEl);
 
     // Restore where it was scrolled to, then nudge only as far as needed to
