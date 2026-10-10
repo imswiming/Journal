@@ -718,6 +718,15 @@
     z-index: 50;
     padding: 1.5rem;
   }
+  .tabs-list { display: flex; flex-direction: column; gap: 0.4rem; max-height: 55vh; overflow-y: auto; margin: 0.75rem 0 0.25rem; }
+  .tabs-row { display: flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.45rem; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+  .tabs-row.closed .tabs-row-name { color: var(--muted); }
+  .tabs-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; background: none; border: none; font: inherit; font-weight: 600; color: var(--ink); padding: 0.3rem 0.2rem; cursor: pointer; }
+  .tabs-move { flex: 0 0 auto; width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; cursor: pointer; }
+  .tabs-move:disabled { opacity: 0.35; cursor: default; }
+  .tabs-toggle { flex: 0 0 auto; min-width: 4.2rem; padding: 0.35rem 0.6rem; border-radius: 999px; font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+  .tabs-toggle.closed { background: transparent; color: var(--accent); }
+  .notes-tab-folder { position: sticky; left: 0; z-index: 1; flex: 0 0 auto; }
   .modal-box {
     background: var(--panel);
     border-radius: 14px;
@@ -1252,6 +1261,19 @@
      native prompt() throws rather than showing anything in some mobile
      browser contexts (embedded webviews, standalone/PWA mode), which would
      otherwise make the Notes tab bar's +/rename silently fail there. -->
+<!-- Manage notes: open/close tabs and change their order - see openTabsOverlay. -->
+<div id="tabs-overlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box tabs-box">
+    <h3>Your notes</h3>
+    <p class="account-note">Open or close notes and change their order. A closed note isn't deleted - open it again here any time.</p>
+    <div id="tabs-list" class="tabs-list"></div>
+    <div class="comment-actions">
+      <span class="nav-spacer"></span>
+      <button id="tabs-done" class="account-primary" type="button">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- Cloud sync sign-in - see the "Cloud sync" section of the script. -->
 <div id="account-overlay" class="modal-overlay" style="display:none;">
   <div class="modal-box account-box">
@@ -3593,6 +3615,20 @@
   // {id, name, content} note, all saved together as one JSON array.)
   // ============================================================
   var NOTES_TABS_KEY = "notes:tabs";
+  // Notes you've closed from the tab bar (see openTabsOverlay) - kept on this
+  // device only, like open browser tabs; they're not deleted and still sync.
+  var NOTES_CLOSED_KEY = "notes:closedTabs";
+  function loadClosedTabIds() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(NOTES_CLOSED_KEY) || "[]");
+      return Array.isArray(saved) ? saved : [];
+    } catch (e) { return []; }
+  }
+  var closedTabIds = loadClosedTabIds();
+  function saveClosedTabIds() {
+    try { localStorage.setItem(NOTES_CLOSED_KEY, JSON.stringify(closedTabIds)); } catch (e) { /* retried on the next change */ }
+  }
+  function isTabClosed(id) { return closedTabIds.indexOf(id) !== -1; }
   var NOTES_ACTIVE_TAB_KEY = "notes:activeTab";
   var NOTES_LEGACY_KEY = "notes:content"; // pre-tabs single-note blob, migrated below
   var notesEditor = null;
@@ -4180,7 +4216,8 @@
     if (notesEditor) notesEditor.setData(tab.content || "<p></p>");
   }
   function switchNotesTab(id) {
-    if (id === activeNotesTabId) return;
+    if (isTabClosed(id)) { closedTabIds = closedTabIds.filter(function (x) { return x !== id; }); saveClosedTabIds(); }
+    if (id === activeNotesTabId) { renderNotesTabBar(); return; }
     saveActiveNotesTabContent();
     activeNotesTabId = id;
     localStorage.setItem(NOTES_ACTIVE_TAB_KEY, id);
@@ -4227,6 +4264,89 @@
     renderNotesTabBar();
   }
 
+  // ---------- Manage notes overlay ----------
+  var tabsOverlay = document.getElementById("tabs-overlay");
+  var tabsListEl = document.getElementById("tabs-list");
+  function openTabsOverlay() {
+    renderTabsOverlay();
+    tabsOverlay.style.display = "flex";
+  }
+  function closeTabsOverlay() { tabsOverlay.style.display = "none"; }
+  function setNotesTabClosed(id, closed) {
+    if (closed) {
+      var stillOpen = notesTabs.filter(function (t) { return t.id !== id && !isTabClosed(t.id); });
+      if (!stillOpen.length) { showToast("Keep at least one note open"); return; }
+      if (!isTabClosed(id)) closedTabIds.push(id);
+      saveClosedTabIds();
+      if (activeNotesTabId === id) switchNotesTab(stillOpen[0].id);
+    } else {
+      closedTabIds = closedTabIds.filter(function (x) { return x !== id; });
+      saveClosedTabIds();
+    }
+    renderNotesTabBar();
+    renderTabsOverlay();
+  }
+  function moveNotesTab(id, delta) {
+    var from = notesTabs.findIndex(function (t) { return t.id === id; });
+    var to = from + delta;
+    if (from === -1 || to < 0 || to >= notesTabs.length) return;
+    var moved = notesTabs.splice(from, 1)[0];
+    notesTabs.splice(to, 0, moved);
+    saveNotesTabs();
+    // The tabs sync in the order they're stored, so a pure reorder needs its
+    // own flag - see cloudMergeNotes.
+    var st = cloudSt();
+    st.orderDirty = ++st.seq;
+    cloudMarkDirty("notes");
+    renderNotesTabBar();
+    renderTabsOverlay();
+  }
+  function renderTabsOverlay() {
+    tabsListEl.innerHTML = "";
+    notesTabs.forEach(function (tab, i) {
+      var closed = isTabClosed(tab.id) && tab.id !== activeNotesTabId;
+      var row = document.createElement("div");
+      row.className = "tabs-row" + (closed ? " closed" : "");
+
+      var name = document.createElement("button");
+      name.type = "button";
+      name.className = "tabs-row-name";
+      name.textContent = tab.name || "Untitled";
+      name.title = "Go to this note";
+      name.addEventListener("click", function () {
+        switchNotesTab(tab.id);
+        closeTabsOverlay();
+      });
+      row.appendChild(name);
+
+      [[0x25B2, "Move up", -1], [0x25BC, "Move down", 1]].forEach(function (def) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "tabs-move";
+        b.textContent = String.fromCharCode(def[0]);
+        b.title = def[1];
+        b.disabled = (def[2] < 0 && i === 0) || (def[2] > 0 && i === notesTabs.length - 1);
+        b.addEventListener("click", function () { moveNotesTab(tab.id, def[2]); });
+        row.appendChild(b);
+      });
+
+      var toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "tabs-toggle" + (closed ? " closed" : "");
+      toggle.textContent = closed ? "Closed" : "Open";
+      toggle.title = closed ? "Open this note" : "Close this note";
+      toggle.addEventListener("click", function () { setNotesTabClosed(tab.id, !closed); });
+      row.appendChild(toggle);
+
+      tabsListEl.appendChild(row);
+    });
+  }
+  document.getElementById("tabs-done").addEventListener("click", closeTabsOverlay);
+  tabsOverlay.addEventListener("click", function (e) { if (e.target === tabsOverlay) closeTabsOverlay(); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && tabsOverlay.style.display !== "none") closeTabsOverlay();
+  });
+
   function renderNotesTabBar() {
     var bar = document.getElementById("notes-tab-bar");
     if (!bar) return;
@@ -4235,8 +4355,16 @@
     var keptScroll = bar.scrollLeft;
     var syncEl = bar.querySelector(".sync-in-tabs");
     bar.innerHTML = "";
+    var folderBtn = document.createElement("button");
+    folderBtn.type = "button";
+    folderBtn.className = "notes-tab notes-tab-folder";
+    folderBtn.title = "Open, close and reorder your notes";
+    folderBtn.textContent = String.fromCharCode(0xD83D, 0xDCC1); // folder emoji
+    folderBtn.addEventListener("click", openTabsOverlay);
+    bar.appendChild(folderBtn);
     notesTabs.forEach(function (tab) {
       var isActive = tab.id === activeNotesTabId;
+      if (isTabClosed(tab.id) && !isActive) return;
       var tabEl = document.createElement("button");
       tabEl.type = "button";
       tabEl.className = "notes-tab" + (isActive ? " active" : "");
@@ -4833,9 +4961,18 @@
     });
 
     if (!result.length) return; // never leave Notes with no tabs at all
+    if (st.orderDirty) {
+      // A reorder made here hasn't uploaded yet: keep this device's order
+      // (tabs it doesn't know about go after, in the cloud's order).
+      var rank = {};
+      notesTabs.forEach(function (t, i) { rank[t.id] = i; });
+      result = result.map(function (t, i) { return { t: t, k: t.id in rank ? rank[t.id] : notesTabs.length + i }; })
+        .sort(function (a, b) { return a.k - b.k; })
+        .map(function (x) { return x.t; });
+    }
     notesTabs = result;
     st.notesBase = { tabs: remoteTabs };
-    if (Object.keys(st.dirtyTabs).length || Object.keys(st.deletedTabs).length) {
+    if (Object.keys(st.dirtyTabs).length || Object.keys(st.deletedTabs).length || st.orderDirty) {
       st.dirty.notes = st.dirty.notes || ++st.seq;
     } else {
       delete st.dirty.notes;
@@ -4950,6 +5087,7 @@
     if (key === "notes") {
       var snapTabs = Object.assign({}, st.dirtyTabs);
       var snapDeleted = Object.assign({}, st.deletedTabs);
+      var snapOrder = st.orderDirty;
       var payload = { tabs: notesTabs.map(cloneNoteTab) };
       return cloudCasWrite(key, payload).then(function (ok) {
         if (!ok) return false;
@@ -4958,7 +5096,8 @@
         // while it was in flight stays marked for the next one.
         Object.keys(snapTabs).forEach(function (id) { if (st.dirtyTabs[id] === snapTabs[id]) delete st.dirtyTabs[id]; });
         Object.keys(snapDeleted).forEach(function (id) { if (st.deletedTabs[id] === snapDeleted[id]) delete st.deletedTabs[id]; });
-        if (!Object.keys(st.dirtyTabs).length && !Object.keys(st.deletedTabs).length && st.dirty.notes === seq) delete st.dirty.notes;
+        if (st.orderDirty === snapOrder) delete st.orderDirty;
+        if (!Object.keys(st.dirtyTabs).length && !Object.keys(st.deletedTabs).length && !st.orderDirty && st.dirty.notes === seq) delete st.dirty.notes;
         return true;
       });
     }
