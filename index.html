@@ -3760,7 +3760,7 @@
     if (keep) {
       if (body.firstElementChild !== keep || body.firstChild !== keep) { body.insertBefore(keep, body.firstChild); changed = true; }
     } else {
-      body.insertAdjacentHTML("afterbegin", PRAYER_HTML);
+      body.insertAdjacentHTML("afterbegin", PRAYER_HTML + TWO_BLANK_LINES);
       changed = true;
     }
     if (changed) tab.content = body.innerHTML;
@@ -3771,19 +3771,54 @@
   // unless today already has one anywhere in it - safe to call every time the
   // tab is shown. Other tabs (Overview, Prayer List, any custom note) never
   // get this. Returns true if tab.content changed (stamped, or cleaned up).
+  // Every "Thank God for:" and "Prayer requests:" bubble is followed by two
+  // blank lines to write on: new ones are created with them (TWO_BLANK_LINES),
+  // and this tops up older ones. It only touches a bubble with nothing written
+  // under it (the next block is a date heading, another bubble, or the end) -
+  // a line you've typed into one of the blanks must never get fresh blanks
+  // pushed in above it on every load. Never removes anything. Returns true if
+  // it added any.
+  var TWO_BLANK_LINES = "<p>&nbsp;</p><p>&nbsp;</p>";
+  function isBlankParagraph(el) {
+    return !!el && el.tagName === "P" && !(el.textContent || "").replace(/\s/g, "");
+  }
+  function ensureBubbleSpacing(tab) {
+    var body = parseHtmlBody(tab.content);
+    var changed = false;
+    Array.prototype.slice.call(body.children).forEach(function (el) {
+      var isBubble = isPrayerBubble(el) || (el.tagName === "BLOCKQUOTE" && /^\s*thank god for/i.test(el.textContent || ""));
+      if (!isBubble) return;
+      var last = el;
+      var blanks = 0;
+      while (isBlankParagraph(last.nextElementSibling)) { last = last.nextElementSibling; blanks++; }
+      if (blanks >= 2) return;
+      var next = last.nextElementSibling;
+      if (next && next.tagName !== "H4" && !isPrayerBubble(next) && !(next.tagName === "BLOCKQUOTE" && /^\s*thank god for/i.test(next.textContent || ""))) return;
+      var html = "";
+      for (var i = blanks; i < 2; i++) html += "<p>&nbsp;</p>";
+      last.insertAdjacentHTML("afterend", html);
+      changed = true;
+    });
+    if (changed) tab.content = body.innerHTML;
+    return changed;
+  }
+
   function ensureTodaysDateBlock(tab) {
     if (!tab || !isJournalTab(tab)) return false;
     var cleaned = removeRedundantEmptyStamps(tab);
     cleaned = upgradeEmptyGratitudeBoxes(tab) || cleaned;
     var changed = ensurePrayerBubble(tab) || cleaned;
+    cleaned = ensureBubbleSpacing(tab) || cleaned;
     if (!hasTodaysHeading(tab)) {
-      // Below the prayer bubble, above the older days.
+      // Below the prayer bubble (and its blank lines), above the older days.
       var body = parseHtmlBody(tab.content);
-      var rest = body.children.length > 1 ? "<p>&nbsp;</p>" : "";
-      body.firstElementChild.insertAdjacentHTML("afterend", todaysHeadingHtml() + GRATITUDE_HTML + rest);
+      var anchor = body.firstElementChild;
+      while (isBlankParagraph(anchor.nextElementSibling)) anchor = anchor.nextElementSibling;
+      anchor.insertAdjacentHTML("afterend", todaysHeadingHtml() + GRATITUDE_HTML + TWO_BLANK_LINES);
       tab.content = body.innerHTML;
       changed = true;
     }
+    changed = changed || cleaned;
     if (changed) saveNotesTabs();
     if (cleaned) cloudMarkNoteTabDirty(tab.id); // so the cleanup reaches the other devices too
     return changed;
