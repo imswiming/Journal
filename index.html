@@ -1254,6 +1254,8 @@
     <div id="account-signed-in" style="display:none;">
       <p class="account-note">Signed in as <strong id="account-email-label"></strong></p>
       <p class="account-note" id="account-last-sync"></p>
+      <p class="account-note"><a href="#" id="account-import-hl">Import highlights from a file&hellip;</a></p>
+      <input id="account-import-file" type="file" accept=".json,application/json" style="display:none;">
       <div class="comment-actions">
         <button id="account-signout" type="button">Sign out</button>
         <span class="nav-spacer"></span>
@@ -4834,6 +4836,74 @@
   var accountSendBtn = document.getElementById("account-send");
   var accountVerifyBtn = document.getElementById("account-verify");
   var accountPendingEmail = null;
+
+  // Highlights can be brought in from a private file (a JSON list of
+  // [book, chapter, verse]) - the verses are only ever in the file you pick
+  // on your own device, never in this page, so anyone else opening the site
+  // still sees an empty one. Each verse is highlighted the same way the
+  // "Highlight verse" button does it, then queued to sync like any other
+  // highlight. Verses you'd already highlighted are left as they are.
+  function importHighlightRefs(refs) {
+    if (!nivData) return { error: "The Bible text is still loading - try again in a moment." };
+    var byChapter = {};
+    refs.forEach(function (r) {
+      if (!r || r.length < 3 || !nivData[r[0]] || !nivData[r[0]][r[1]]) return;
+      var key = r[0] + ":" + r[1];
+      (byChapter[key] = byChapter[key] || { book: r[0], chapter: r[1], verses: [] }).verses.push(String(r[2]));
+    });
+    var added = 0, chapters = 0;
+    Object.keys(byChapter).forEach(function (key) {
+      var info = byChapter[key];
+      var box = document.createElement("div");
+      var saved = localStorage.getItem(highlightKey(info.book, info.chapter));
+      if (saved) {
+        box.innerHTML = saved;
+      } else {
+        var verses = nivData[info.book][info.chapter];
+        var html = "";
+        Object.keys(verses).map(function (v) { return parseInt(v, 10); })
+          .sort(function (a, b) { return a - b; })
+          .forEach(function (v) { html += '<sup class="verse-num">' + v + '</sup>' + verses[String(v)] + " "; });
+        box.innerHTML = html;
+      }
+      var before = added;
+      info.verses.forEach(function (verse) {
+        var sups = Array.prototype.slice.call(box.querySelectorAll("sup.verse-num"));
+        var idx = sups.findIndex(function (sup) { return sup.textContent === verse; });
+        if (idx === -1) return;
+        var range = document.createRange();
+        range.setStartAfter(sups[idx]);
+        if (sups[idx + 1]) range.setEndBefore(sups[idx + 1]); else range.setEnd(box, box.childNodes.length);
+        if (range.cloneContents().querySelector("mark")) return; // already highlighted
+        wrapRangeInMark(range);
+        added++;
+      });
+      if (added === before) return;
+      chapters++;
+      localStorage.setItem(highlightKey(info.book, info.chapter), box.innerHTML);
+      cloudMarkDirty("hl:" + info.book + ":" + info.chapter);
+      cloudRefreshRenderedChapter(info.book + ":" + info.chapter);
+    });
+    return { added: added, chapters: chapters };
+  }
+  var accountImportFile = document.getElementById("account-import-file");
+  document.getElementById("account-import-hl").addEventListener("click", function (e) {
+    e.preventDefault();
+    accountImportFile.click();
+  });
+  accountImportFile.addEventListener("change", function () {
+    var file = accountImportFile.files && accountImportFile.files[0];
+    accountImportFile.value = "";
+    if (!file) return;
+    file.text().then(function (text) {
+      var refs = JSON.parse(text);
+      if (!Array.isArray(refs)) throw new Error("not a list");
+      var result = importHighlightRefs(refs);
+      showToast(result.error || ("Imported " + result.added + " highlights in " + result.chapters + " chapters"));
+    }).catch(function () {
+      showToast("Couldn't read that file");
+    });
+  });
 
   var CLOUD_STATUS_LABELS = {
     signedOut: "Sign in to sync",
