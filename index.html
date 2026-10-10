@@ -4386,6 +4386,24 @@
         }
         return changed;
       });
+      // The first letter typed at the start of a line (a paragraph, bullet,
+      // checklist item, heading...) is capitalised.
+      editor.commands.get("insertText").on("execute", function (evt, args) {
+        var options = args[0];
+        if (!options || typeof options.text !== "string" || !options.text) return;
+        var first = options.text.charAt(0);
+        var upper = first.toLocaleUpperCase();
+        if (upper === first || upper.length !== 1) return;
+        var selection = options.selection || editor.model.document.selection;
+        var position = selection.getFirstPosition();
+        if (position && position.isAtStart && position.parent.is("element") && editor.model.schema.isBlock(position.parent)) {
+          options.text = upper + options.text.slice(1);
+        }
+      }, { priority: "high" });
+      // Phone keyboards do the same themselves when told to.
+      editor.editing.view.change(function (writer) {
+        writer.setAttribute("autocapitalize", "sentences", editor.editing.view.document.getRoot());
+      });
       document.querySelectorAll("#notes-toolbar .notes-toolbar-btn").forEach(function (b) { b.disabled = false; });
 
       // Tab/Shift+Tab indent/outdent the current line - same commands as the
