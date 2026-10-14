@@ -126,8 +126,7 @@
     display: flex;
     gap: 0.5rem;
     padding: 0 1rem;
-    background: var(--bg);
-    border-bottom: 1px solid var(--line);
+    background: transparent;
     transition: transform 0.25s ease;
   }
   .column-tabs.tabs-hidden { transform: translateY(-130%); }
@@ -299,6 +298,10 @@
   #notes-editor-wrap .ck.ck-content ol { padding-left: 1.6em; margin: 0.2em 0; }
   #notes-editor-wrap .ck.ck-content .todo-list { list-style: none; }
   #notes-editor-wrap .ck.ck-content .todo-list__label input[type="checkbox"] { cursor: pointer; }
+  #notes-editor-wrap .ck.ck-content .todo-list .todo-list__label > span[contenteditable=false] > input[checked]::before {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
   #notes-editor-wrap .ck.ck-content .todo-list__label:has(input:checked) .todo-list__label__description {
     text-decoration: line-through;
     color: var(--muted);
@@ -603,23 +606,29 @@
   }
   #comment-overlay {
     position: fixed;
-    inset: auto 0 0 0;
-    background: var(--panel);
-    display: none;
-    border-top: 1px solid var(--line);
-    border-radius: 14px 14px 0 0;
-    box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.25);
-    padding: 1rem;
-    padding-bottom: max(1rem, env(safe-area-inset-bottom));
-    z-index: 50;
-    max-width: 40rem;
-    margin: 0 auto;
     left: 0;
     right: 0;
+    bottom: 0;
+    background: var(--panel);
+    display: none;
+    border: 1px solid var(--line);
+    border-bottom: none;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.25);
+    padding: 0.5rem;
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+    z-index: 50;
+  }
+  #comment-overlay .comment-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
   }
   #comment-input {
     width: 100%;
-    padding: 0.6rem;
+    max-width: 40rem;
+    padding: 0.5rem 0.6rem;
     border: 1px solid var(--line);
     border-radius: 8px;
     background: var(--bg);
@@ -645,7 +654,7 @@
     cursor: pointer;
   }
   /* Same look as the selection menu's buttons (.selection-menu button). */
-  #comment-overlay .comment-actions { justify-content: center; }
+  #comment-overlay .comment-actions { justify-content: center; margin-top: 0; gap: 0.4rem; }
   #comment-overlay .comment-actions button {
     border: none;
     border-radius: 6px;
@@ -738,7 +747,7 @@
   .tabs-row.dragging { border-color: var(--accent); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); position: relative; z-index: 1; }
   .tabs-toggle { flex: 0 0 auto; min-width: 5.4rem; padding: 0.4rem 0.7rem; border-radius: 999px; font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; border: 1px solid var(--accent); background: transparent; color: var(--accent); }
   .tabs-toggle.open-action { background: var(--accent); color: #fff; }
-  .notes-tab-folder { position: sticky; left: 0; z-index: 1; flex: 0 0 auto; justify-content: center; box-sizing: border-box; width: 1.9rem; height: 1.9rem; padding: 0; align-self: center; border-radius: 50%; }
+  .notes-tab-folder { flex: 0 0 auto; }
   .modal-box {
     background: var(--panel);
     border-radius: 14px;
@@ -771,27 +780,13 @@
   .sync-btn { white-space: nowrap; }
   .sync-btn.sync-signed-out { color: var(--accent); border-color: var(--accent); }
   .sync-btn.sync-problem { color: #b45309; border-color: #f59e0b; }
-  /* Mobile Notes: no "Notes" heading (the tabs make it obvious), the sync
-     button sits at the far right of the tabs' row, and the tabs themselves
-     are one line you scroll sideways rather than wrapping onto more lines. */
+  /* Mobile Notes: no "Notes" heading (the tabs make it obvious), and the sync
+     button joins the end of the tabs' row. The open tabs wrap onto as many
+     lines as they need. */
   @media (max-width: 1099px) {
     .notes-title-row { display: none; }
-    .sync-in-tabs { display: block; }
-    .notes-tab-bar {
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      scrollbar-width: none;
-      -webkit-overflow-scrolling: touch;
-      /* Hitting the end of the tabs shouldn't hand the swipe on to the
-         column pager and flick to another column. */
-      overscroll-behavior-x: contain;
-    }
-    .notes-tab-bar::-webkit-scrollbar { display: none; }
-    .notes-tab { flex: 0 0 auto; white-space: nowrap; }
-    .sync-in-tabs { flex: 0 0 auto; margin-left: auto; }
-    /* The folder stays put while the tabs scroll; a thick ring in the page
-       colour around it hides them as they slide behind. */
-    .notes-tab-folder { box-shadow: 0 0 0 0.85rem var(--bg); margin-right: 0.75rem; }
+    .sync-in-tabs { display: block; margin-left: auto; }
+    .notes-tab { white-space: nowrap; }
   }
   .account-box { max-width: 26rem; }
   .account-box h3 {
@@ -1220,13 +1215,13 @@
 </div>
 
 <div id="selection-menu" class="selection-menu" style="display:none;">
-  <textarea id="selection-comment" rows="2" placeholder="Write a comment on this verse (added to the Journal)"></textarea>
+  <textarea id="selection-comment" rows="2" placeholder="Write a comment on this verse (added to your note)"></textarea>
   <button id="selection-highlight-btn" type="button">Highlight</button>
   <button id="selection-highlight-verse-btn" type="button">Highlight verse</button>
   <button id="selection-read-btn" type="button">I read this</button>
   <button id="view-biblehub" type="button">View on BibleHub</button>
   <button id="view-xrefs" type="button">Cross References</button>
-  <button id="selection-overview-btn" type="button">Add to Journal</button>
+  <button id="selection-overview-btn" type="button">Add to Notes</button>
 </div>
 
 <!-- Mobile-only cross references panel - see openXrefPanel. Lives outside
@@ -1261,9 +1256,9 @@
 
 <div id="comment-overlay" style="display:none;">
   <div class="comment-box">
-    <textarea id="comment-input" rows="2" placeholder="Write a comment on this verse (added to the Journal)" aria-label="Comment on this highlight"></textarea>
+    <textarea id="comment-input" rows="2" placeholder="Write a comment on this verse (added to your note)" aria-label="Comment on this highlight"></textarea>
     <div class="comment-actions">
-      <button id="comment-journal" type="button">Add to Journal</button>
+      <button id="comment-journal" type="button">Add to Notes</button>
       <button id="mark-read-today" type="button">I read this today</button>
       <button id="comment-xrefs" type="button">Cross References</button>
       <button id="comment-biblehub" type="button">View on BibleHub</button>
@@ -1624,6 +1619,15 @@
   // phase to catch them regardless of which column is scrolling.
   var tabsLastScrollY = 0;
   var tabsScrollScheduled = false;
+  // One switch for everything that slides away while scrolling down - the top
+  // tabs, the Notes menu and Read's nav bar - so they never get out of step.
+  function setChromeHidden(hidden) {
+    columnTabsEl.classList.toggle("tabs-hidden", hidden);
+    var notesHeader = document.querySelector(".notes-sticky-header");
+    var readNav = document.querySelector(".nav-bar");
+    if (notesHeader) notesHeader.classList.toggle("bar-hidden", hidden);
+    if (readNav) readNav.classList.toggle("bar-hidden", hidden);
+  }
   function updateColumnTabsVisibility(scrollTop) {
     // Skipped while a text field has focus - this reads columnTabsEl's
     // offsetHeight (layout-forcing) and can itself be triggered by a mobile
@@ -1632,19 +1636,19 @@
     // tab bar hides is a much smaller loss than freezing the page while typing.
     if (isTypingInTextField()) return;
     if (isDesktopColumns()) {
-      columnTabsEl.classList.remove("tabs-hidden");
+      setChromeHidden(false);
       tabsLastScrollY = scrollTop;
       return;
     }
     if (scrollTop > tabsLastScrollY && scrollTop > columnTabsEl.offsetHeight) {
-      columnTabsEl.classList.add("tabs-hidden");
+      setChromeHidden(true);
       // Nudges the real page scroll (see body's own min-height) in the same
       // direction - a mobile browser's address bar only collapses in
       // response to the actual page scrolling, which never otherwise
       // happens here since every column scrolls within itself, not the page.
       window.scrollTo(0, 1);
     } else if (scrollTop < tabsLastScrollY) {
-      columnTabsEl.classList.remove("tabs-hidden");
+      setChromeHidden(false);
       window.scrollTo(0, 0);
     }
     tabsLastScrollY = scrollTop;
@@ -2130,7 +2134,7 @@
         var addJournalLink = document.createElement("a");
         addJournalLink.href = "#";
         addJournalLink.className = "source-link";
-        addJournalLink.textContent = "Add to Journal";
+        addJournalLink.textContent = "Add to Notes";
         addJournalLink.addEventListener("click", function (e) {
           e.preventDefault();
           addScriptureToJournal(ref.book + " " + ref.chapter + ":" + ref.verse + " — " + verseText);
@@ -3037,7 +3041,7 @@
     var add = document.createElement("a");
     add.href = "#";
     add.className = "xref-add-link";
-    add.textContent = "Add to Journal";
+    add.textContent = "Add to Notes";
     add.addEventListener("click", function (e) {
       e.preventDefault();
       addScriptureToJournal(v.book + " " + v.chapter + ":" + v.verse + " — " + v.text);
@@ -3387,8 +3391,6 @@
   }
 
   var navBarEl = document.querySelector(".nav-bar");
-  autoHideOnScroll(readColumn, navBarEl, false);
-  autoHideOnScroll(document.getElementById("col-notes"), document.querySelector(".notes-sticky-header"), true);
   readColumn.addEventListener("scroll", function () {
     if (Date.now() < menuAutoScrollUntil) return;                // our own scroll-into-view
     if (document.activeElement === selectionCommentInput) return; // the keyboard can scroll the page itself
@@ -3590,9 +3592,36 @@
     cloudMarkDirty("activity");
   }
 
+  // Days stay newest-first, but within each day the verses run in the order
+  // they appear in the Bible (book, chapter, verse) rather than the order they
+  // were read in. Entries for the same verse keep their original order.
+  function activityBibleOrder(entries) {
+    var days = [];
+    var byDay = {};
+    entries.forEach(function (entry, i) {
+      var day = new Date(entry.date).toDateString();
+      if (!byDay[day]) { byDay[day] = []; days.push(byDay[day]); }
+      byDay[day].push({ entry: entry, i: i });
+    });
+    var out = [];
+    days.forEach(function (group) {
+      group.sort(function (a, b) {
+        var bookA = BOOKS_IN_ORDER.indexOf(a.entry.book), bookB = BOOKS_IN_ORDER.indexOf(b.entry.book);
+        if (bookA < 0) bookA = 999;
+        if (bookB < 0) bookB = 999;
+        return (bookA - bookB) ||
+          ((parseInt(a.entry.chapter, 10) || 0) - (parseInt(b.entry.chapter, 10) || 0)) ||
+          ((parseInt(a.entry.verse, 10) || 0) - (parseInt(b.entry.verse, 10) || 0)) ||
+          (a.i - b.i);
+      });
+      group.forEach(function (g) { out.push(g.entry); });
+    });
+    return out;
+  }
+
   function renderActivityColumn() {
     if (!activityList) return;
-    var entries = loadActivity();
+    var entries = activityBibleOrder(loadActivity());
     activityEmpty.style.display = entries.length ? "none" : "block";
     activityList.innerHTML = "";
     var lastDateHeading = null;
@@ -3645,7 +3674,7 @@
         var overviewBtn = document.createElement("button");
         overviewBtn.type = "button";
         overviewBtn.className = "activity-overview-btn";
-        overviewBtn.title = "Add to Journal";
+        overviewBtn.title = "Add to Notes";
         overviewBtn.textContent = "+";
         overviewBtn.addEventListener("click", function (e) {
           e.stopPropagation();
@@ -3768,7 +3797,7 @@
   // gratitude box is stamped directly below it (see ensureTodaysDateBlock).
   var PRAYER_VERSE = "James 5:16 — Therefore confess your sins to each other and pray for each other so that you may be healed. The prayer of a righteous person is powerful and effective.";
   var PRAYER_HTML = '<blockquote><p>' + PRAYER_VERSE + '</p><p>Prayer requests:</p><ul class="todo-list"><li><label class="todo-list__label"><input type="checkbox" disabled="disabled"><span class="todo-list__label__description">&nbsp;</span></label></li></ul></blockquote>';
-  var GRATITUDE_HTML = "<blockquote><p><i>Thank God for:</i></p><ul><li>&nbsp;</li></ul></blockquote>";
+  var GRATITUDE_HTML = "<blockquote><p><i>Thank God for:</i></p><p>&nbsp;</p><ul><li>&nbsp;</li></ul></blockquote>";
   function isOverviewTab(tab) { return !!tab && tab.name === OVERVIEW_TAB_NAME; }
   function isJournalTab(tab) { return !!tab && tab.name === JOURNAL_TAB_NAME; }
   function escapeHtml(s) {
@@ -3851,6 +3880,7 @@
       var day = days[key] || (days[key] = { pure: [], other: 0 });
       var group = [el];
       var j = i + 1;
+      while (kids[j] && blank(kids[j])) { group.push(kids[j]); j++; } // the blank line under the date
       if (emptyGratitude(kids[j])) {
         group.push(kids[j]);
         j++;
@@ -3880,10 +3910,22 @@
     var body = parseHtmlBody(tab.content);
     var changed = false;
     Array.prototype.forEach.call(body.children, function (el) {
-      if (el.tagName !== "BLOCKQUOTE" || el.querySelector("ul, ol")) return;
+      if (el.tagName !== "BLOCKQUOTE") return;
+      // Only boxes with nothing written in them.
       if (el.textContent.replace(/\s+/g, " ").trim().toLowerCase() !== "thank god for:") return;
-      el.insertAdjacentHTML("beforeend", "<ul><li>&nbsp;</li></ul>");
-      changed = true;
+      var list = el.querySelector("ul, ol");
+      if (!list) {
+        el.insertAdjacentHTML("beforeend", "<p>&nbsp;</p><ul><li>&nbsp;</li></ul>");
+        changed = true;
+      } else if (list.previousElementSibling && list.previousElementSibling.tagName === "P" && list.previousElementSibling.textContent.trim()) {
+        list.insertAdjacentHTML("beforebegin", "<p>&nbsp;</p>"); // a blank line between the label and the first bullet
+        changed = true;
+      }
+      var above = el.previousElementSibling;
+      if (above && above.tagName === "H4") {
+        el.insertAdjacentHTML("beforebegin", "<p>&nbsp;</p>"); // and one between the date and the box
+        changed = true;
+      }
     });
     if (changed) tab.content = body.innerHTML;
     return changed;
@@ -3970,7 +4012,7 @@
       var body = parseHtmlBody(tab.content);
       var anchor = body.firstElementChild;
       while (isBlankParagraph(anchor.nextElementSibling)) anchor = anchor.nextElementSibling;
-      anchor.insertAdjacentHTML("afterend", todaysHeadingHtml() + GRATITUDE_HTML + TWO_BLANK_LINES);
+      anchor.insertAdjacentHTML("afterend", todaysHeadingHtml() + "<p>&nbsp;</p>" + GRATITUDE_HTML + TWO_BLANK_LINES);
       tab.content = body.innerHTML;
       changed = true;
     }
@@ -4045,6 +4087,7 @@
   // tab's content at a time, so there's nothing to track precisely once
   // you've navigated away from Journal), but the specific line is.
   var journalCaretBlockIndex = null;
+  var journalCaretTabId = null; // which note those two indexes belong to
   var journalCaretListItemIndex = null;
 
   // Inserts a new <li> (built from liInnerHtml, already escaped/safe) into
@@ -4073,7 +4116,7 @@
     var isList = function (el) { return !!el && (el.tagName === "UL" || el.tagName === "OL"); };
     var isBlank = function (el) { return !!el && el.tagName === "P" && !el.textContent.trim(); };
 
-    var block = journalCaretBlockIndex !== null ? scratch.children[journalCaretBlockIndex] : null;
+    var block = (journalCaretBlockIndex !== null && journalCaretTabId === tab.id) ? scratch.children[journalCaretBlockIndex] : null;
     var anchor = null;
     var tail = null;      // the rest of a list the entry lands in the middle of
     var replace = null;   // a blank line the entry takes the place of
@@ -4103,13 +4146,20 @@
       if (isBlank(block)) { replace = block; aboveEl = block.previousElementSibling; } // a blank line is replaced by the entry, not left above it
     }
     if (!anchor && !(block && isList(block))) {
-      // No known line: under today's "Thank God for:" box, on its first blank line.
-      var box = Array.prototype.slice.call(scratch.querySelectorAll("blockquote")).filter(function (q) {
-        return /^\s*thank god for/i.test(q.textContent || "");
-      })[0];
-      anchor = box || null;
-      aboveEl = box || null;
-      if (anchor && isBlank(anchor.nextElementSibling)) { anchor = anchor.nextElementSibling; replace = anchor; }
+      if (isJournalTab(tab)) {
+        // No known line: under today's "Thank God for:" box, on its first blank line.
+        var box = Array.prototype.slice.call(scratch.querySelectorAll("blockquote")).filter(function (q) {
+          return /^\s*thank god for/i.test(q.textContent || "");
+        })[0];
+        anchor = box || null;
+        aboveEl = box || null;
+        if (anchor && isBlank(anchor.nextElementSibling)) { anchor = anchor.nextElementSibling; replace = anchor; }
+      } else {
+        // Any other note: at the end of it.
+        anchor = scratch.lastElementChild;
+        aboveEl = anchor;
+        if (anchor && isBlank(anchor)) { replace = anchor; aboveEl = anchor.previousElementSibling; }
+      }
     }
     if (aboveEl && lastLineTextOf(aboveEl).trim()) {
       var gap = document.createElement("p");
@@ -4129,6 +4179,7 @@
     }
     if (tail && last) last.insertAdjacentElement("afterend", tail);
     if (replace && replace.parentNode) replace.remove();
+    journalCaretTabId = tab.id;
     journalCaretBlockIndex = Array.prototype.indexOf.call(scratch.children, last);
     journalCaretListItemIndex = isList(last) ? last.children.length - 1 : null;
     tab.content = scratch.innerHTML;
@@ -4151,7 +4202,7 @@
   // last line the caret was on in the Journal (journalCaretBlockIndex) is the
   // best there is, applied to the stored HTML by fallbackInsert.
   function insertIntoJournal(html, matchText, fallbackInsert) {
-    var tab = getOrCreateJournalTab();
+    var tab = getActiveNotesTab(); // the note that was last open, wherever its caret was
     var editorShowsJournal = !!notesEditor && tab.id === activeNotesTabId;
     if (editorShowsJournal) saveActiveNotesTabContent(); // flush any just-typed text first
     var stamped = ensureTodaysDateBlock(tab);
@@ -4163,7 +4214,7 @@
       fallbackInsert(tab);
       cloudMarkNoteTabDirty(tab.id);
     }
-    showToast("Added to Journal");
+    showToast("Added to Notes");
     focusJournalEntry(tab.id, matchText);
   }
 
@@ -4329,7 +4380,6 @@
   // file.
   document.addEventListener("selectionchange", function () {
     if (!notesEditor) return;
-    if (!isJournalTab(getActiveNotesTab())) return;
     var sel = window.getSelection();
     if (sel && sel.anchorNode) trackJournalCaretFromNode(sel.anchorNode);
   });
@@ -4344,6 +4394,7 @@
     if (!block) return;
     var idx = Array.prototype.indexOf.call(editableRoot.children, block);
     if (idx === -1) return;
+    journalCaretTabId = activeNotesTabId;
     journalCaretBlockIndex = idx;
     journalCaretListItemIndex = (li && li.parentElement === block)
       ? Array.prototype.indexOf.call(block.children, li)
@@ -4400,14 +4451,34 @@
     ensureTodaysDateBlock(tab);
     if (notesEditor) notesEditor.setData(tab.content || "<p></p>");
   }
+  // Where each note was scrolled to, so switching back lands you there.
+  var NOTES_SCROLL_KEY = "notes:scroll";
+  var notesScrollByTab = (function () {
+    try { return JSON.parse(localStorage.getItem(NOTES_SCROLL_KEY) || "{}") || {}; } catch (e) { return {}; }
+  })();
+  function rememberNotesScroll() {
+    var column = document.getElementById("col-notes");
+    if (!column || !activeNotesTabId) return;
+    notesScrollByTab[activeNotesTabId] = column.scrollTop;
+    try { localStorage.setItem(NOTES_SCROLL_KEY, JSON.stringify(notesScrollByTab)); } catch (e) { /* not worth failing over */ }
+  }
+  function restoreNotesScroll() {
+    var column = document.getElementById("col-notes");
+    if (!column) return;
+    var y = notesScrollByTab[activeNotesTabId] || 0;
+    // After the editor has laid the new note out.
+    requestAnimationFrame(function () { requestAnimationFrame(function () { column.scrollTop = y; }); });
+  }
   function switchNotesTab(id) {
     if (isTabClosed(id)) { closedTabIds = closedTabIds.filter(function (x) { return x !== id; }); saveClosedTabIds(); }
     if (id === activeNotesTabId) { renderNotesTabBar(); return; }
+    rememberNotesScroll();
     saveActiveNotesTabContent();
     activeNotesTabId = id;
     localStorage.setItem(NOTES_ACTIVE_TAB_KEY, id);
     showActiveNotesTabContent();
     renderNotesTabBar();
+    restoreNotesScroll();
   }
   function addNotesTab() {
     showTextPrompt("Name for the new note:", "Untitled").then(function (name) {
@@ -4800,8 +4871,11 @@
       notesEditor.execute("todoList");
       notesEditor.editing.view.focus();
     });
-    makeBtn("⇤", "Decrease indent", outdentNotesLine);
-    makeBtn("⇥", "Increase indent", indentNotesLine);
+    var SVG_OPEN = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+    makeBtn("", "Decrease indent", outdentNotesLine).innerHTML =
+      SVG_OPEN + '<path d="M3 5h18M11 10h10M11 15h10M3 20h18"/><path d="M7 9l-4 3 4 3z" fill="currentColor"/></svg>';
+    makeBtn("", "Increase indent", indentNotesLine).innerHTML =
+      SVG_OPEN + '<path d="M3 5h18M11 10h10M11 15h10M3 20h18"/><path d="M3 9l4 3-4 3z" fill="currentColor"/></svg>';
     makeBtn("📌", "Add the selected text (or current line) to the Overview note", function () {
       var text = getActiveNoteSelectionText();
       if (text) addOverviewEntry(text);
