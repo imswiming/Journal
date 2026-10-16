@@ -3,7 +3,7 @@
 // the last copy fetched is what's used when you're offline. Other sites
 // (Supabase, Google fonts/search) and the big Bible data files, which the
 // page keeps in its own IndexedDB cache, are left alone.
-var CACHE = "journal-app-v1";
+var CACHE = "journal-app-v2";
 var SHELL = ["./", "index.html", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", function (event) {
@@ -27,7 +27,11 @@ self.addEventListener("fetch", function (event) {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.indexOf("/data/") !== -1 && url.pathname.indexOf("words-of-jesus") === -1) return;
   event.respondWith(
-    fetch(request).then(function (response) {
+    // "no-cache" = always ask the server whether the file changed (a cheap 304
+    // when it hasn't), instead of trusting the browser's own copy, which the
+    // host lets it keep for ten minutes - that's how an installed app ended up
+    // running old code.
+    fetch(request, { cache: "no-cache" }).then(function (response) {
       if (response && response.ok) {
         var copy = response.clone();
         caches.open(CACHE).then(function (cache) { cache.put(request, copy); });

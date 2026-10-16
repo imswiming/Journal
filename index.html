@@ -2799,6 +2799,58 @@
   }
   loadWordsOfJesus();
 
+  // ---------- Stay on the latest version ----------
+  // An installed app is only really closed now and then, so it can keep
+  // running old code for days. This compares the script this page is running
+  // with the one on the server - when the page loads, when the app comes back
+  // to the foreground, and every ten minutes - and reloads into the new one.
+  // Never while you're typing or a dialog is open, and never more than once a
+  // minute. (APP_UPDATE_MARK: the comparison finds this script by that word.)
+  function hashText(text) {
+    var h = 5381;
+    for (var i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+    return String(h) + ":" + text.length;
+  }
+  var APP_SCRIPT_HASH = hashText(document.currentScript ? document.currentScript.textContent : "");
+  function appVersionChanged() {
+    return fetch(new URL("index.html", location.href), { cache: "no-store" }).then(function (res) {
+      return res.ok ? res.text() : "";
+    }).then(function (html) {
+      if (!html) return false;
+      var doc = new DOMParser().parseFromString(html, "text/html");
+      var main = Array.prototype.filter.call(doc.scripts, function (sc) {
+        return sc.textContent.indexOf("APP_UPDATE_MARK") !== -1;
+      })[0];
+      return !!main && hashText(main.textContent) !== APP_SCRIPT_HASH;
+    }).catch(function () { return false; });
+  }
+  var lastVersionCheck = 0;
+  function checkForNewVersion() {
+    if (!/^https?:$/.test(location.protocol)) return;
+    if (Date.now() - lastVersionCheck < 30000) return;
+    lastVersionCheck = Date.now();
+    appVersionChanged().then(function (changed) {
+      if (!changed) return;
+      var dialogOpen = Array.prototype.some.call(document.querySelectorAll(".modal-overlay"), function (o) {
+        return o.style.display === "flex" || o.style.display === "block";
+      });
+      if (isTypingInTextField() || dialogOpen) return; // try again at the next check
+      try {
+        if (Date.now() - parseInt(sessionStorage.getItem("app:reloadedAt") || "0", 10) < 60000) return;
+        sessionStorage.setItem("app:reloadedAt", String(Date.now()));
+      } catch (e) { /* no sessionStorage: the 30 second throttle above still applies */ }
+      flushNotesEditorForCloud(); // the editor's text goes into its note first
+      location.reload();
+    });
+  }
+  window.addEventListener("load", function () { setTimeout(checkForNewVersion, 4000); });
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") checkForNewVersion();
+  });
+  setInterval(function () {
+    if (document.visibilityState === "visible") checkForNewVersion();
+  }, 600000);
+
   // Lets the browser offer/perform a real install (no address bar) and keeps
   // the app opening offline - see sw.js.
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
