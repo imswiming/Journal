@@ -768,20 +768,20 @@
   .notes-title-row h1 { margin: 0; }
   .sync-btn {
     flex: 0 0 auto;
-    padding: 0.35rem 0.75rem;
+    padding: 0.3rem 0.8rem;
     border: 1px solid var(--line);
     border-radius: 999px;
     background: var(--panel);
     color: var(--muted);
-    font-family: "Figtree", sans-serif;
+    font-family: inherit;
     font-size: 0.8rem;
     font-weight: 600;
     cursor: pointer;
   }
-  /* A fixed minimum wide enough for the longest label ("Offline - will
-     retry"): otherwise the width changes with each status, the tab row
-     re-wraps, and the editor below it jumps up and down. */
-  .sync-btn { white-space: nowrap; min-width: 9.5rem; text-align: center; }
+  /* A fixed minimum wide enough for the longest label ("Syncing…"):
+     otherwise the width changes with each status, the tab row re-wraps, and
+     the editor below it jumps up and down. */
+  .sync-btn { white-space: nowrap; min-width: 6.3rem; text-align: center; }
   .sync-btn.sync-signed-out { color: var(--accent); border-color: var(--accent); }
   .sync-btn.sync-problem { color: #b45309; border-color: #f59e0b; }
   /* Mobile Notes: no "Notes" heading (the tabs make it obvious), and the sync
@@ -789,7 +789,7 @@
      lines as they need. */
   @media (max-width: 1099px) {
     .notes-title-row { display: none; }
-    .sync-in-tabs { display: block; margin-left: auto; }
+    .sync-in-tabs { display: block; }
     .notes-tab { white-space: nowrap; }
   }
   .account-box { max-width: 26rem; }
@@ -6077,18 +6077,29 @@
     });
   });
 
+  // Short, so the sync pill stays as small as a note tab; the full wording is
+  // its tooltip.
   var CLOUD_STATUS_LABELS = {
-    signedOut: "Sign in to sync",
+    signedOut: "Sign in",
     syncing: "Syncing…",
     synced: "Synced",
-    pending: "Changes waiting",
-    offline: "Offline – will retry",
+    pending: "Waiting",
+    offline: "Offline",
+    unavailable: "Sync off"
+  };
+  var CLOUD_STATUS_TITLES = {
+    signedOut: "Sign in to sync your notes, highlights and activity",
+    syncing: "Syncing…",
+    synced: "Everything is synced",
+    pending: "Changes waiting to sync",
+    offline: "Offline - will retry",
     unavailable: "Sync unavailable"
   };
   function setCloudStatus(status) {
     cloudStatus = status;
     syncBtns.forEach(function (btn) {
       btn.textContent = "☁ " + CLOUD_STATUS_LABELS[status];
+      btn.title = CLOUD_STATUS_TITLES[status];
       btn.classList.toggle("sync-signed-out", status === "signedOut");
       btn.classList.toggle("sync-problem", status === "offline" || status === "pending" || status === "unavailable");
     });
