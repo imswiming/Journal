@@ -1051,11 +1051,16 @@
     #read-xref-btn, #xref-panel { display: none !important; }
     body.xref-panel-open #col-read .column-pad { padding-bottom: 3rem; }
   }
-  /* The random highlighted verse at the bottom of the Notes column. Sticky, so
-     it rides the bottom edge of the column while there's more note above it,
-     and slides away with the other menus (setChromeHidden). Out of the way
-     while you're typing, so it never covers the keyboard's worth of text. */
-  #col-notes .column-pad { padding-bottom: 0; }
+  /* The random highlighted verse at the bottom of the Bible reader, switched on
+     and off by the dice button in its nav bar. Sticky, so it rides the bottom
+     edge of the column while there's more text above it - and sits above the
+     cross reference panel when that's open (positionVerseStrip). */
+  body:not(.verse-strip-open) #verse-strip { display: none !important; }
+  body.verse-strip-open #col-read .column-pad { padding-bottom: 0; }
+  body.verse-strip-open #read-verse-btn {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
   .verse-strip {
     position: sticky;
     bottom: 0;
@@ -1067,11 +1072,8 @@
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
     padding: 0.6rem 0.75rem;
     padding-bottom: max(0.6rem, env(safe-area-inset-bottom));
-    transition: transform 0.25s ease;
-    touch-action: pan-y; /* a sideways swipe on it steps through verses, not through the columns */
+    touch-action: pan-y; /* a sideways drag on it does nothing (and doesn't turn the page) */
   }
-  .verse-strip.strip-hidden { transform: translateY(120%); }
-  #notes-editor-wrap:focus-within + .verse-strip { display: none !important; }
   .verse-strip-head {
     display: flex;
     align-items: center;
@@ -1247,12 +1249,31 @@
             <button id="prev-chapter" class="nav-btn" type="button" title="Back">&larr;</button>
             <button id="next-chapter" class="nav-btn" type="button" title="Forward">&rarr;</button>
             <span class="nav-spacer"></span>
+            <button id="read-verse-btn" class="nav-btn" type="button" title="Random highlighted verse (on / off)">&#127922;</button>
             <button id="read-xref-btn" class="nav-btn" type="button" title="Cross references">&#128279;</button>
             <button id="read-search-btn" class="nav-btn" type="button" title="Search the Bible">&#128269;</button>
           </div>
           <div id="bible-text"></div>
         </div>
         <p id="bible-empty" style="display:none;">The Bible text is still loading.</p>
+        <!-- A random verse from the ones you've highlighted - see showStripVerse. Shown
+             at the bottom of the reader while the dice button in the nav bar is on. -->
+        <div id="verse-strip" class="verse-strip" style="display:none;">
+          <div class="verse-strip-head">
+            <span>Random highlighted verse</span>
+            <span class="nav-spacer"></span>
+            <span id="verse-strip-count" title="Verses shown so far this round, out of all your highlighted verses"></span>
+            <button id="verse-strip-next" type="button">Another verse</button>
+          </div>
+          <div class="verse-strip-body">
+            <button id="verse-strip-prev" class="verse-strip-step" type="button" title="Previous verse">&lsaquo;</button>
+            <div id="verse-strip-card" class="verse-strip-card">
+              <div id="verse-strip-ref" class="verse-strip-ref"></div>
+              <div id="verse-strip-text" class="verse-strip-text"></div>
+            </div>
+            <button id="verse-strip-forward" class="verse-strip-step" type="button" title="Next verse">&rsaquo;</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1293,23 +1314,6 @@
         </div>
         <div id="notes-editor-wrap" class="panel">
           <div id="notes-editor"></div>
-        </div>
-        <!-- A random verse from the ones you've highlighted - see showStripVerse. -->
-        <div id="verse-strip" class="verse-strip" style="display:none;">
-          <div class="verse-strip-head">
-            <span>Random highlighted verse</span>
-            <span class="nav-spacer"></span>
-            <span id="verse-strip-count" title="Verses shown so far this round, out of all your highlighted verses"></span>
-            <button id="verse-strip-next" type="button">Another verse</button>
-          </div>
-          <div class="verse-strip-body">
-            <button id="verse-strip-prev" class="verse-strip-step" type="button" title="Previous verse">&lsaquo;</button>
-            <div id="verse-strip-card" class="verse-strip-card">
-              <div id="verse-strip-ref" class="verse-strip-ref"></div>
-              <div id="verse-strip-text" class="verse-strip-text"></div>
-            </div>
-            <button id="verse-strip-forward" class="verse-strip-step" type="button" title="Next verse">&rsaquo;</button>
-          </div>
         </div>
       </div>
     </section>
@@ -1810,7 +1814,7 @@
   // count changes, the strip appears if this is the first highlight, and goes
   // away if the last one was removed.
   function refreshStripAfterHighlightChange() {
-    if (!verseStrip) return;
+    if (!verseStrip || !verseStripIsOn()) return; // nothing to update (or draw) while it's off
     if (verseStrip.style.display === "none") showStripVerse(); else updateStripCount();
   }
 
@@ -1862,8 +1866,8 @@
     refEl.appendChild(link);
     document.getElementById("verse-strip-text").textContent = lookupVerseText(ref);
     document.getElementById("verse-strip-prev").disabled = stripIndex <= 0;
-    updateStripCount();
     verseStrip.style.display = "";
+    updateStripCount(); // hides it again if there are no highlighted verses left
   }
   // A new random verse (pick-once), added after the newest one shown.
   function showStripVerse() {
@@ -1977,14 +1981,42 @@
     stripCarousel.slide(1);
   });
 
+  // The dice button in the Bible reader's nav bar turns the strip on and off
+  // (remembered between visits). Turning it on shows the verse it was last on,
+  // or draws the first one.
+  var VERSE_STRIP_ON_KEY = "verseStrip:on";
+  function verseStripIsOn() { return document.body.classList.contains("verse-strip-open"); }
+  function setVerseStripOn(on) {
+    document.body.classList.toggle("verse-strip-open", on);
+    try { localStorage.setItem(VERSE_STRIP_ON_KEY, on ? "1" : "0"); } catch (e) { /* just not remembered */ }
+    if (!on) return;
+    if (stripHistory.length) renderStripVerse(); else showStripVerse();
+    positionVerseStrip();
+  }
+  function applyVerseStripToggle() {
+    var wasOn = false;
+    try { wasOn = localStorage.getItem(VERSE_STRIP_ON_KEY) === "1"; } catch (e) { /* off */ }
+    if (wasOn) setVerseStripOn(true);
+  }
+  // When the cross reference panel is open on a phone it takes the bottom of
+  // the screen, so the strip sits just above it.
+  function positionVerseStrip() {
+    if (!verseStrip) return;
+    verseStrip.style.bottom = isXrefPanelOpen() ? xrefPanel.offsetHeight + "px" : "";
+  }
+  window.addEventListener("resize", positionVerseStrip);
+  document.getElementById("read-verse-btn").addEventListener("click", function () {
+    if (verseStripIsOn()) { setVerseStripOn(false); return; }
+    setVerseStripOn(true);
+    if (verseStrip.style.display === "none") { // nothing highlighted yet
+      setVerseStripOn(false);
+      showToast("Highlight some verses first and they'll show up here");
+    }
+  });
+
   // One switch for everything that slides away while scrolling down - the top
   // tabs, the Notes menu and Read's nav bar - so they never get out of step.
   function setChromeHidden(hidden) {
-    var wasHidden = columnTabsEl.classList.contains("tabs-hidden");
-    if (verseStrip) {
-      verseStrip.classList.toggle("strip-hidden", hidden);
-      if (wasHidden && !hidden) showStripVerse(); // back in view: a new verse
-    }
     columnTabsEl.classList.toggle("tabs-hidden", hidden);
     var notesHeader = document.querySelector(".notes-sticky-header");
     var readNav = document.querySelector(".nav-bar");
@@ -3542,6 +3574,7 @@
     fillXrefPanelCard(message);
     // The card's height can change from one verse to the next.
     if (selectionMenu.style.display !== "none") positionSelectionMenu();
+    positionVerseStrip();
   }
   function fillXrefPanelCard(message) {
     var total = xrefPanelVerses.length;
@@ -3600,6 +3633,7 @@
   function closeXrefPanel() {
     document.body.classList.remove("xref-panel-open");
     if (selectionMenu.style.display !== "none") positionSelectionMenu();
+    positionVerseStrip();
   }
 
   document.getElementById("read-xref-btn").addEventListener("click", function () {
@@ -3863,7 +3897,7 @@
   function initReader() {
     if (readerInited) return;
     readerInited = true;
-    showStripVerse(); // the Bible text is in: the strip's first verse
+    applyVerseStripToggle(); // the Bible text is in: bring the strip back if it was left on
 
     populateBooks();
 
@@ -4690,10 +4724,10 @@
     });
   }
 
-  // Verse text added to the Journal keeps the same light grey as the flash,
-  // permanently, so scripture stands out from what you wrote yourself.
+  // Verse text added to a note is plain text (it used to be marked with a
+  // permanent light grey - see removeVerseGreyFromAllNotes).
   function journalVerseMark(text) {
-    return '<mark class="marker-grey">' + escapeHtml(text) + "</mark>";
+    return escapeHtml(text);
   }
 
   // A verse on its own - search results, cross references, Recent Activity,
@@ -4857,7 +4891,30 @@
   // CKEditor has finished loading (it's lazy - see ensureNotesEditorLoaded) -
   // it's just a no-op until notesEditor exists, since initNotesEditor() reads
   // getActiveNotesTab() itself once it does.
+  // Verses added to a note used to get a permanent light grey highlight
+  // (<mark class="marker-grey">, which nothing else ever applies); it's gone
+  // now, and this takes it out of notes that already have it - including
+  // ones that arrive from another device still adding it. Returns the ids of
+  // the notes it changed.
+  function removeVerseGreyFromAllNotes() {
+    var changedIds = [];
+    notesTabs.forEach(function (tab) {
+      if (!tab.content || tab.content.indexOf("marker-grey") === -1) return;
+      var body = parseHtmlBody(tab.content);
+      Array.prototype.forEach.call(body.querySelectorAll("mark.marker-grey"), function (mark) {
+        while (mark.firstChild) mark.parentNode.insertBefore(mark.firstChild, mark);
+        mark.remove();
+      });
+      tab.content = body.innerHTML;
+      changedIds.push(tab.id);
+      cloudMarkNoteTabDirty(tab.id);
+    });
+    if (changedIds.length) saveNotesTabs();
+    return changedIds;
+  }
+
   function showActiveNotesTabContent() {
+    removeVerseGreyFromAllNotes();
     var tab = getActiveNotesTab();
     ensureTodaysDateBlock(tab);
     if (notesEditor) notesEditor.setData(tab.content || "<p></p>");
@@ -5338,7 +5395,7 @@
           { model: "greyMarker", class: "marker-grey", title: "Grey", color: "#eef2f6", type: "marker" }
         ]
       },
-      initialData: (function () { var tab = getActiveNotesTab(); ensureTodaysDateBlock(tab); return tab.content || "<p></p>"; })()
+      initialData: (function () { removeVerseGreyFromAllNotes(); var tab = getActiveNotesTab(); ensureTodaysDateBlock(tab); return tab.content || "<p></p>"; })()
     }).then(function (editor) {
       // DecoupledEditor doesn't attach its own toolbar/UI anywhere by default -
       // this is driven entirely through the Checklist/Title/Outdent/Indent
@@ -5745,6 +5802,7 @@
       localStorage.setItem(NOTES_ACTIVE_TAB_KEY, activeNotesTabId);
       activeChanged = true;
     }
+    if (removeVerseGreyFromAllNotes().indexOf(activeNotesTabId) !== -1) activeChanged = true;
     saveNotesTabs();
     renderNotesTabBar();
     if (activeChanged) cloudRefreshNotesEditor();
