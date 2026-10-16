@@ -1012,6 +1012,7 @@
     align-items: center;
     gap: 0.4rem;
     margin-top: 0.4rem;
+    overflow: hidden; /* the card slides in and out of here */
   }
   .xref-panel-card {
     flex: 1;
@@ -1024,6 +1025,8 @@
   }
   .xref-panel-card .xref-empty { margin: 0; padding: 0.25rem 0; }
   .xref-panel-step {
+    position: relative; /* stays above the card as it slides past */
+    z-index: 1;
     flex: 0 0 auto;
     width: 2rem;
     height: 2rem;
@@ -1040,6 +1043,88 @@
     /* Desktop has the Cross References column instead (see getColumnIds). */
     #read-xref-btn, #xref-panel { display: none !important; }
     body.xref-panel-open #col-read .column-pad { padding-bottom: 3rem; }
+  }
+  /* The random highlighted verse at the bottom of the Notes column. Sticky, so
+     it rides the bottom edge of the column while there's more note above it,
+     and slides away with the other menus (setChromeHidden). Out of the way
+     while you're typing, so it never covers the keyboard's worth of text. */
+  #col-notes .column-pad { padding-bottom: 0; }
+  .verse-strip {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin: 1.5rem -1.25rem 0;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+    padding: 0.6rem 0.75rem;
+    padding-bottom: max(0.6rem, env(safe-area-inset-bottom));
+    transition: transform 0.25s ease;
+    touch-action: pan-y; /* a sideways swipe on it steps through verses, not through the columns */
+  }
+  .verse-strip.strip-hidden { transform: translateY(120%); }
+  #notes-editor-wrap:focus-within + .verse-strip { display: none !important; }
+  .verse-strip-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: "Figtree", sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--muted);
+  }
+  #verse-strip-count { font-size: 0.75rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+  #verse-strip-next {
+    padding: 0.3rem 0.8rem;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    font-family: "Figtree", sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .verse-strip-body {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+    overflow: hidden; /* the card slides in and out of here */
+  }
+  .verse-strip-card { flex: 1; min-width: 0; will-change: transform; }
+  .verse-strip-ref {
+    font-family: "Figtree", sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 0.15rem;
+  }
+  .verse-strip-ref .verse-ref { color: var(--accent); text-decoration: underline; cursor: pointer; }
+  .verse-strip-step {
+    position: relative; /* stays above the card as it slides past */
+    z-index: 1;
+    flex: 0 0 auto;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 1.2rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .verse-strip-step:disabled { opacity: 0.3; cursor: default; }
+  .verse-strip-text {
+    max-height: 28vh;
+    overflow-y: auto;
+    font-family: "Lora", Georgia, serif;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    color: var(--ink);
   }
   .activity-date-heading {
     font-family: "Figtree", sans-serif;
@@ -1196,6 +1281,23 @@
         </div>
         <div id="notes-editor-wrap" class="panel">
           <div id="notes-editor"></div>
+        </div>
+        <!-- A random verse from the ones you've highlighted - see showStripVerse. -->
+        <div id="verse-strip" class="verse-strip" style="display:none;">
+          <div class="verse-strip-head">
+            <span>Random highlighted verse</span>
+            <span class="nav-spacer"></span>
+            <span id="verse-strip-count" title="Verses shown so far this round, out of all your highlighted verses"></span>
+            <button id="verse-strip-next" type="button">Another verse</button>
+          </div>
+          <div class="verse-strip-body">
+            <button id="verse-strip-prev" class="verse-strip-step" type="button" title="Previous verse">&lsaquo;</button>
+            <div id="verse-strip-card" class="verse-strip-card">
+              <div id="verse-strip-ref" class="verse-strip-ref"></div>
+              <div id="verse-strip-text" class="verse-strip-text"></div>
+            </div>
+            <button id="verse-strip-forward" class="verse-strip-step" type="button" title="Next verse">&rsaquo;</button>
+          </div>
         </div>
       </div>
     </section>
@@ -1623,9 +1725,251 @@
   // phase to catch them regardless of which column is scrolling.
   var tabsLastScrollY = 0;
   var tabsScrollScheduled = false;
+  // ============================================================
+  // Random highlighted verse strip (bottom of the Notes column)
+  //
+  // Picks from the verses you've highlighted, in a "pick once" order: every
+  // highlighted verse comes up once before any comes up again, then the round
+  // starts over. The verses already shown this round are kept in
+  // localStorage (VERSE_STRIP_SEEN_KEY) so the round survives a reload. A
+  // new verse is chosen each time the strip slides back into view, and
+  // whenever "Another verse" is pressed.
+  // ============================================================
+  var VERSE_STRIP_SEEN_KEY = "verseStrip:seen";
+  var verseStrip = document.getElementById("verse-strip");
+  var currentStripKey = null;
+
+  // Every verse with any highlighted text in it, as "Book|chapter|verse".
+  function highlightedVerseKeys() {
+    var keys = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var storageKey = localStorage.key(i);
+      if (!storageKey || storageKey.indexOf(HIGHLIGHT_PREFIX) !== 0) continue;
+      var html = localStorage.getItem(storageKey);
+      if (!html || html.indexOf("<mark") === -1) continue;
+      var bookChapter = storageKey.slice(HIGHLIGHT_PREFIX.length);
+      var cut = bookChapter.lastIndexOf(":");
+      var book = bookChapter.slice(0, cut);
+      var chapter = bookChapter.slice(cut + 1);
+      var walker = document.createTreeWalker(parseHtmlBody(html), NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, null);
+      var verse = null;
+      var found = {};
+      var node;
+      while ((node = walker.nextNode())) {
+        if (node.nodeType === 1) {
+          if (node.tagName === "SUP" && node.classList.contains("verse-num")) verse = node.textContent;
+          continue;
+        }
+        if (!verse || !node.nodeValue.trim() || node.parentElement.tagName === "SUP") continue;
+        if (node.parentElement.closest("mark.highlight")) found[verse] = true;
+      }
+      Object.keys(found).forEach(function (v) { keys.push(book + "|" + chapter + "|" + v); });
+    }
+    return keys;
+  }
+  function verseKeyToRef(key) {
+    var parts = key.split("|");
+    return { book: parts[0], chapter: parts[1], verse: parts[2] };
+  }
+
+  // The highlighted verses we can actually show (the Bible text has to be loaded).
+  function stripPool() {
+    return highlightedVerseKeys().filter(function (key) { return !!lookupVerseText(verseKeyToRef(key)); });
+  }
+  function readStripSeen() {
+    var seen;
+    try { seen = JSON.parse(localStorage.getItem(VERSE_STRIP_SEEN_KEY) || "[]"); } catch (e) { seen = []; }
+    return Array.isArray(seen) ? seen : [];
+  }
+  // "3 of 12": how many of your highlighted verses have come up so far this
+  // round, out of all of them. Worked out fresh each time, so it follows
+  // highlights being added or removed (see refreshStripAfterHighlightChange).
+  function updateStripCount() {
+    if (!verseStrip) return;
+    var pool = stripPool();
+    if (!pool.length) {
+      verseStrip.style.display = "none";
+      return;
+    }
+    var done = readStripSeen().filter(function (key) { return pool.indexOf(key) !== -1; }).length;
+    document.getElementById("verse-strip-count").textContent = done + " of " + pool.length;
+  }
+  // Called whenever a highlight is made, removed, imported or synced in: the
+  // count changes, the strip appears if this is the first highlight, and goes
+  // away if the last one was removed.
+  function refreshStripAfterHighlightChange() {
+    if (!verseStrip) return;
+    if (verseStrip.style.display === "none") showStripVerse(); else updateStripCount();
+  }
+
+  // The next verse in the pick-once order, or null if nothing's highlighted
+  // (or the Bible text isn't loaded yet).
+  function pickNextStripVerse() {
+    var pool = stripPool();
+    if (!pool.length) return null;
+    var seen = readStripSeen();
+    var left = pool.filter(function (key) { return seen.indexOf(key) === -1; });
+    if (!left.length) {
+      seen = [];            // all picked once: start the round again
+      left = pool.slice();
+      // ...but not straight back to the verse that just ended the last one.
+      if (pool.length > 1 && currentStripKey) {
+        var others = left.filter(function (key) { return key !== currentStripKey; });
+        if (others.length) left = others;
+      }
+    }
+    var pick = left[Math.floor(Math.random() * left.length)];
+    seen.push(pick);
+    try { localStorage.setItem(VERSE_STRIP_SEEN_KEY, JSON.stringify(seen)); } catch (e) { /* the round just won't survive a reload */ }
+    return pick;
+  }
+
+  // The verses shown so far, so the ‹ › buttons can step back and forward
+  // through them; stepping forward past the newest one draws a new verse.
+  var stripHistory = [];
+  var stripIndex = -1;
+  function renderStripVerse() {
+    var key = stripHistory[stripIndex];
+    if (!key) {
+      verseStrip.style.display = "none";
+      return;
+    }
+    currentStripKey = key;
+    var ref = verseKeyToRef(key);
+    var refEl = document.getElementById("verse-strip-ref");
+    refEl.innerHTML = "";
+    var link = document.createElement("a");
+    link.className = "verse-ref";
+    link.href = "#";
+    link.textContent = ref.book + " " + ref.chapter + ":" + ref.verse;
+    link.title = "Open this verse in the Bible";
+    link.addEventListener("click", function (e) {
+      e.preventDefault();
+      goToVerseInRead(ref.book, parseInt(ref.chapter, 10), parseInt(ref.verse, 10));
+    });
+    refEl.appendChild(link);
+    document.getElementById("verse-strip-text").textContent = lookupVerseText(ref);
+    document.getElementById("verse-strip-prev").disabled = stripIndex <= 0;
+    updateStripCount();
+    verseStrip.style.display = "";
+  }
+  // A new random verse (pick-once), added after the newest one shown.
+  function showStripVerse() {
+    if (!verseStrip) return;
+    var key = pickNextStripVerse();
+    if (!key) {
+      verseStrip.style.display = "none";
+      return;
+    }
+    stripHistory.push(key);
+    if (stripHistory.length > 50) stripHistory.shift();
+    stripIndex = stripHistory.length - 1;
+    renderStripVerse();
+  }
+  function stepStripVerse(delta) {
+    var target = stripIndex + delta;
+    if (target < 0) return;
+    if (target >= stripHistory.length) { showStripVerse(); return; }
+    stripIndex = target;
+    renderStripVerse();
+  }
+
+  // A sliding carousel for one card inside a swipe "zone" (the whole panel):
+  // the card follows the finger while it drags; on release it slides off and
+  // the next one slides in from the other side - or, if the drag was too short
+  // or there's nothing that way, it springs back. The ‹ › buttons use the same
+  // slide. dir is +1 for the next card (finger moving left), -1 for the
+  // previous. Used by the cross reference panel and the verse strip.
+  function makeSwipeStepper(opts) {
+    var zone = opts.zone, card = opts.card;
+    var busy = false, startX = null, startY = null, dragging = false, lastDx = 0;
+    function width() { return card.getBoundingClientRect().width || zone.getBoundingClientRect().width || 300; }
+    function springBack() {
+      card.style.transition = "transform 0.18s ease-out, opacity 0.18s ease-out";
+      card.style.transform = "";
+      card.style.opacity = "";
+    }
+    function slide(dir) {
+      if (busy) return;
+      if (!opts.canStep(dir)) { springBack(); return; }
+      busy = true;
+      var w = width();
+      card.style.transition = "transform 0.16s ease-in, opacity 0.16s ease-in";
+      card.style.transform = "translateX(" + (-dir * w) + "px)";
+      card.style.opacity = "0";
+      setTimeout(function () {
+        opts.step(dir);
+        // The new card waits just off the opposite edge, then slides in.
+        card.style.transition = "none";
+        card.style.transform = "translateX(" + (dir * w) + "px)";
+        card.style.opacity = "0";
+        void card.offsetWidth;
+        card.style.transition = "transform 0.2s ease-out, opacity 0.2s ease-out";
+        card.style.transform = "";
+        card.style.opacity = "";
+        setTimeout(function () { card.style.transition = ""; busy = false; }, 220);
+      }, 160);
+    }
+    zone.addEventListener("touchstart", function (e) {
+      var t = e.touches && e.touches[0];
+      if (!t || busy) { startX = null; return; }
+      startX = t.clientX;
+      startY = t.clientY;
+      dragging = false;
+      lastDx = 0;
+    }, { passive: true });
+    zone.addEventListener("touchmove", function (e) {
+      if (startX === null) return;
+      var t = e.touches && e.touches[0];
+      if (!t) return;
+      var dx = t.clientX - startX, dy = t.clientY - startY;
+      if (!dragging) {
+        if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+        dragging = true;
+      }
+      lastDx = dx;
+      // Heavier to drag when there's nothing in that direction.
+      var shown = opts.canStep(dx < 0 ? 1 : -1) ? dx : dx * 0.3;
+      card.style.transition = "none";
+      card.style.transform = "translateX(" + shown + "px)";
+      card.style.opacity = String(1 - Math.min(Math.abs(shown) / width(), 1) * 0.6);
+    }, { passive: true });
+    function end() {
+      if (startX === null) return;
+      var wasDragging = dragging, dx = lastDx;
+      startX = null;
+      dragging = false;
+      if (!wasDragging) return;
+      if (Math.abs(dx) >= Math.max(50, width() * 0.25)) slide(dx < 0 ? 1 : -1); else springBack();
+    }
+    zone.addEventListener("touchend", end, { passive: true });
+    zone.addEventListener("touchcancel", end, { passive: true });
+    return { slide: slide };
+  }
+
+  var stripCarousel = makeSwipeStepper({
+    zone: verseStrip,
+    card: document.getElementById("verse-strip-card"),
+    canStep: function (dir) { return dir > 0 || stripIndex > 0; },
+    step: function (dir) { stepStripVerse(dir); }
+  });
+  document.getElementById("verse-strip-prev").addEventListener("click", function () { stripCarousel.slide(-1); });
+  document.getElementById("verse-strip-forward").addEventListener("click", function () { stripCarousel.slide(1); });
+  // "Another verse" always draws a fresh one, even from partway back through
+  // the ones already shown.
+  document.getElementById("verse-strip-next").addEventListener("click", function () {
+    stripIndex = stripHistory.length - 1;
+    stripCarousel.slide(1);
+  });
+
   // One switch for everything that slides away while scrolling down - the top
   // tabs, the Notes menu and Read's nav bar - so they never get out of step.
   function setChromeHidden(hidden) {
+    var wasHidden = columnTabsEl.classList.contains("tabs-hidden");
+    if (verseStrip) {
+      verseStrip.classList.toggle("strip-hidden", hidden);
+      if (wasHidden && !hidden) showStripVerse(); // back in view: a new verse
+    }
     columnTabsEl.classList.toggle("tabs-hidden", hidden);
     var notesHeader = document.querySelector(".notes-sticky-header");
     var readNav = document.querySelector(".nav-bar");
@@ -2587,6 +2931,7 @@
     });
     localStorage.setItem(highlightKey(book, chapter), copy.innerHTML);
     cloudMarkDirty("hl:" + book + ":" + chapter);
+    refreshStripAfterHighlightChange();
   }
 
   function wrapRangeInMark(range) {
@@ -3194,27 +3539,21 @@
     if (document.body.classList.contains("xref-panel-open")) closeXrefPanel(); else openXrefPanel();
   });
   document.getElementById("xref-panel-close").addEventListener("click", closeXrefPanel);
-  xrefPanelPrev.addEventListener("click", function () { stepXrefPanel(-1); });
-  xrefPanelNext.addEventListener("click", function () { stepXrefPanel(1); });
 
-  // Finger moving right-to-left shows the next verse, left-to-right the
-  // previous - same direction as moving between the pager's columns.
-  var xrefSwipeX = null, xrefSwipeY = null;
-  xrefPanel.addEventListener("touchstart", function (e) {
-    var t = e.touches && e.touches[0];
-    if (!t) return;
-    xrefSwipeX = t.clientX;
-    xrefSwipeY = t.clientY;
-  }, { passive: true });
-  xrefPanel.addEventListener("touchend", function (e) {
-    if (xrefSwipeX === null) return;
-    var t = e.changedTouches && e.changedTouches[0];
-    var dx = t ? t.clientX - xrefSwipeX : 0;
-    var dy = t ? t.clientY - xrefSwipeY : 0;
-    xrefSwipeX = null;
-    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
-    stepXrefPanel(dx < 0 ? 1 : -1);
-  }, { passive: true });
+  // Dragging the card left slides in the next verse, right the previous (the
+  // same direction as moving between the pager's columns); the ‹ › buttons
+  // slide it too. See makeSwipeStepper.
+  var xrefCarousel = makeSwipeStepper({
+    zone: xrefPanel,
+    card: xrefPanelCard,
+    canStep: function (dir) {
+      var target = xrefPanelIndex + dir;
+      return target >= 0 && target < xrefPanelVerses.length;
+    },
+    step: function (dir) { stepXrefPanel(dir); }
+  });
+  xrefPanelPrev.addEventListener("click", function () { xrefCarousel.slide(-1); });
+  xrefPanelNext.addEventListener("click", function () { xrefCarousel.slide(1); });
 
   function renderXrefList(ref, abbr) {
     xrefTitle.textContent = "Cross References — " + ref.book + " " + ref.chapter + ":" + ref.verse;
@@ -3457,6 +3796,7 @@
   function initReader() {
     if (readerInited) return;
     readerInited = true;
+    showStripVerse(); // the Bible text is in: the strip's first verse
 
     populateBooks();
 
@@ -5396,6 +5736,7 @@
     }
     localStorage.setItem(lsKey, data.html);
     cloudRefreshRenderedChapter(bookChapter);
+    refreshStripAfterHighlightChange();
   }
   function cloudRefreshRenderedChapter(bookChapter) {
     var idx = bookChapter.lastIndexOf(":");
@@ -5657,6 +5998,7 @@
       cloudMarkDirty("hl:" + info.book + ":" + info.chapter);
       cloudRefreshRenderedChapter(info.book + ":" + info.chapter);
     });
+    refreshStripAfterHighlightChange();
     return { added: added, chapters: chapters };
   }
   var accountImportFile = document.getElementById("account-import-file");
