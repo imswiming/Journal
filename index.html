@@ -782,6 +782,13 @@
      otherwise the width changes with each status, the tab row re-wraps, and
      the editor below it jumps up and down. */
   .sync-btn { white-space: nowrap; min-width: 6.3rem; text-align: center; }
+  /* Every pill in the tab bar - tabs, folder, sync - is exactly the same
+     height, whatever's inside. Without this a row's pills all stretch to its
+     tallest one, and the cloud symbol in the sync pill can be taller than the
+     text on some phones (it comes from the emoji font), making that whole row
+     taller than the rows above. */
+  .notes-tab-bar { align-items: center; }
+  .notes-tab, .sync-btn { box-sizing: border-box; height: 1.8rem; padding-top: 0; padding-bottom: 0; line-height: 1; }
   .sync-btn.sync-signed-out { color: var(--accent); border-color: var(--accent); }
   .sync-btn.sync-problem { color: #b45309; border-color: #f59e0b; }
   /* Mobile Notes: no "Notes" heading (the tabs make it obvious), and the sync
