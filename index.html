@@ -1917,7 +1917,9 @@
     }
     zone.addEventListener("touchstart", function (e) {
       var t = e.touches && e.touches[0];
-      if (!t || busy) { startX = null; return; }
+      // swipe: false turns finger-dragging off (the ‹ › buttons still slide the
+      // card); with startX left null the move/end handlers do nothing.
+      if (!t || busy || opts.swipe === false) { startX = null; return; }
       startX = t.clientX;
       startY = t.clientY;
       dragging = false;
@@ -1955,6 +1957,7 @@
   var stripCarousel = makeSwipeStepper({
     zone: verseStrip,
     card: document.getElementById("verse-strip-card"),
+    swipe: false, // on a phone it's buttons only: no sliding the verse sideways
     canStep: function (dir) { return dir > 0 || stripIndex > 0; },
     step: function (dir) { stepStripVerse(dir); }
   });
@@ -3597,12 +3600,12 @@
   });
   document.getElementById("xref-panel-close").addEventListener("click", closeXrefPanel);
 
-  // Dragging the card left slides in the next verse, right the previous (the
-  // same direction as moving between the pager's columns); the ‹ › buttons
-  // slide it too. See makeSwipeStepper.
+  // The ‹ › buttons slide the card to the next or previous verse (dragging it
+  // with a finger is switched off). See makeSwipeStepper.
   var xrefCarousel = makeSwipeStepper({
     zone: xrefPanel,
     card: xrefPanelCard,
+    swipe: false, // buttons only: no sliding the verse sideways
     canStep: function (dir) {
       var target = xrefPanelIndex + dir;
       return target >= 0 && target < xrefPanelVerses.length;
