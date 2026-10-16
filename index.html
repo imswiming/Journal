@@ -47,7 +47,7 @@
     --line: #c9d3de;
     --accent: #2f5fd0;
     --highlight: #fff3a0;
-    --flash: #eef2f6;
+    --flash: #e1e8f0;
     --jesus: #b3261e;
   }
   @media (prefers-color-scheme: dark) {
@@ -126,7 +126,8 @@
     display: flex;
     gap: 0.5rem;
     padding: 0 1rem;
-    background: transparent;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
     transition: transform 0.25s ease;
   }
   .column-tabs.tabs-hidden { transform: translateY(-130%); }
@@ -777,7 +778,10 @@
     font-weight: 600;
     cursor: pointer;
   }
-  .sync-btn { white-space: nowrap; }
+  /* A fixed minimum wide enough for the longest label ("Offline - will
+     retry"): otherwise the width changes with each status, the tab row
+     re-wraps, and the editor below it jumps up and down. */
+  .sync-btn { white-space: nowrap; min-width: 9.5rem; text-align: center; }
   .sync-btn.sync-signed-out { color: var(--accent); border-color: var(--accent); }
   .sync-btn.sync-problem { color: #b45309; border-color: #f59e0b; }
   /* Mobile Notes: no "Notes" heading (the tabs make it obvious), and the sync
