@@ -789,13 +789,18 @@
      taller than the rows above. */
   .notes-tab-bar { align-items: center; }
   .notes-tab, .sync-btn { box-sizing: border-box; height: 1.8rem; padding-top: 0; padding-bottom: 0; line-height: 1; }
-  .sync-btn.sync-signed-out { color: var(--accent); border-color: var(--accent); }
+  .sync-btn.sync-signed-out, .sync-btn.sync-busy { color: var(--accent); border-color: var(--accent); }
   .sync-btn.sync-problem { color: #b45309; border-color: #f59e0b; }
   /* Mobile Notes: no "Notes" heading (the tabs make it obvious), and the sync
      button joins the end of the tabs' row. The open tabs wrap onto as many
      lines as they need. */
   @media (max-width: 1099px) {
     .notes-title-row { display: none; }
+    /* Just the cloud on a phone - its colour says how it's going (blue =
+       sign in / syncing, amber = a problem), and pressing it or holding it
+       gives the full wording. */
+    .sync-btn .sync-label { display: none; }
+    .sync-btn { min-width: 0; }
     .sync-in-tabs { display: block; }
     .notes-tab { white-space: nowrap; }
   }
@@ -1304,11 +1309,11 @@
              sync code updates them together). -->
         <div class="notes-title-row">
           <h1>Notes</h1>
-          <button class="sync-btn" type="button">&#9729; Sign in to sync</button>
+          <button class="sync-btn" type="button"><span class="sync-icon">&#9729;</span><span class="sync-label"> Sign in</span></button>
         </div>
         <div class="notes-sticky-header">
           <div class="notes-tabs-row">
-            <div id="notes-tab-bar" class="notes-tab-bar"><button class="sync-btn sync-in-tabs" type="button">&#9729; Sign in to sync</button></div>
+            <div id="notes-tab-bar" class="notes-tab-bar"><button class="sync-btn sync-in-tabs" type="button"><span class="sync-icon">&#9729;</span><span class="sync-label"> Sign in</span></button></div>
           </div>
           <div id="notes-toolbar" class="notes-toolbar-row"></div>
         </div>
@@ -6166,8 +6171,18 @@
   function setCloudStatus(status) {
     cloudStatus = status;
     syncBtns.forEach(function (btn) {
-      btn.textContent = "☁ " + CLOUD_STATUS_LABELS[status];
+      btn.textContent = "";
+      var icon = document.createElement("span");
+      icon.className = "sync-icon";
+      icon.textContent = "☁";
+      var label = document.createElement("span");
+      label.className = "sync-label";
+      label.textContent = " " + CLOUD_STATUS_LABELS[status];
+      btn.appendChild(icon);
+      btn.appendChild(label);
       btn.title = CLOUD_STATUS_TITLES[status];
+      btn.setAttribute("aria-label", CLOUD_STATUS_TITLES[status]); // the words are hidden on a phone
+      btn.classList.toggle("sync-busy", status === "syncing");
       btn.classList.toggle("sync-signed-out", status === "signedOut");
       btn.classList.toggle("sync-problem", status === "offline" || status === "pending" || status === "unavailable");
     });
